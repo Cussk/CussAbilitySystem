@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "CussAbilitySystem/Public/Components/CussStatComponent.h"
 #include "CussAbilitySystem/Public/Data/CussAbilityData.h"
+#include "Data/CussAbilitySetData.h"
 #include "Net/UnrealNetwork.h"
 
 UCussAbilityComponent::UCussAbilityComponent()
@@ -19,6 +20,11 @@ void UCussAbilityComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	StatComponent = GetOwner() ? GetOwner()->FindComponentByClass<UCussStatComponent>() : nullptr;
+	
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		GrantStartupAbilitySets();
+	}
 }
 
 void UCussAbilityComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -57,6 +63,12 @@ void UCussAbilityComponent::GrantAbility(const UCussAbilityData* AbilityData, in
 		return;
 	}
 
+	const FCussGrantedAbilitySpec* ExistingSpec = FindGrantedAbilityByTag(AbilityData->AbilityTag);
+	if (ExistingSpec)
+	{
+		return;
+	}
+
 	FCussGrantedAbilitySpec NewSpec;
 	NewSpec.AbilityData = AbilityData;
 	NewSpec.AbilityLevel = AbilityLevel;
@@ -64,6 +76,37 @@ void UCussAbilityComponent::GrantAbility(const UCussAbilityData* AbilityData, in
 	NewSpec.CooldownEndTime = 0.f;
 
 	GrantedAbilities.Add(NewSpec);
+}
+
+void UCussAbilityComponent::GrantAbilitySet(const UCussAbilitySetData* AbilitySet)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !AbilitySet)
+	{
+		return;
+	}
+
+	for (const FCussAbilitySetEntry& Entry : AbilitySet->Abilities)
+	{
+		if (!Entry.AbilityData)
+		{
+			continue;
+		}
+
+		GrantAbility(Entry.AbilityData, Entry.AbilityLevel, Entry.InputTag);
+	}
+}
+
+void UCussAbilityComponent::GrantStartupAbilitySets()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	for (const UCussAbilitySetData* AbilitySet : StartupAbilitySets)
+	{
+		GrantAbilitySet(AbilitySet);
+	}
 }
 
 bool UCussAbilityComponent::TryActivateAbilityByTag(FGameplayTag AbilityTag, AActor* OptionalTargetActor, FVector TargetLocation)

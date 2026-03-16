@@ -16,6 +16,30 @@ void UCussStatComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(UCussStatComponent, RuntimeStats);
 }
 
+bool UCussStatComponent::InitializeStat(FGameplayTag StatTag, float CurrentValue, float MaxValue)
+{
+	if (!StatTag.IsValid())
+	{
+		return false;
+	}
+
+	const int32 ExistingIndex = FindStatIndex(StatTag);
+	if (RuntimeStats.IsValidIndex(ExistingIndex))
+	{
+		RuntimeStats[ExistingIndex].MaxValue = MaxValue;
+		RuntimeStats[ExistingIndex].CurrentValue = FMath::Clamp(CurrentValue, 0.f, MaxValue);
+		return true;
+	}
+
+	FCussRuntimeStat NewStat;
+	NewStat.StatTag = StatTag;
+	NewStat.MaxValue = MaxValue;
+	NewStat.CurrentValue = FMath::Clamp(CurrentValue, 0.f, MaxValue);
+
+	RuntimeStats.Add(NewStat);
+	return true;
+}
+
 bool UCussStatComponent::HasStat(FGameplayTag StatTag) const
 {
 	return FindStatIndex(StatTag) != INDEX_NONE;
