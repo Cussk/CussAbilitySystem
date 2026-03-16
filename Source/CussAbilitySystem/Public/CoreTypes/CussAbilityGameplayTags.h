@@ -1,0 +1,48 @@
+// Copyright Kyle Cuss and Cuss Programming 2026
+
+#pragma once
+
+#include "CoreMinimal.h"
+
+#include "NativeGameplayTags.h"
+
+namespace CussAbilityTags
+{
+	// --------------------
+	// Abilities
+	// --------------------
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Fireball);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Heal);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Burn);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Rally);
+	
+	// --------------------
+	// Statuses
+	// --------------------
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Status_Dead);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Status_Stunned);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Status_Silenced);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Status_Buffed);
+	
+	// --------------------
+	// Stats
+	// --------------------
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stat_Health);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stat_Mana);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stat_Energy);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stat_AttackPower);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stat_Defense);
+	
+	// --------------------
+	// Cues
+	// --------------------
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Cue_Cast_Fire);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Cue_Impact_Fire);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Cue_Cast_Heal);
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Cue_Impact_Heal);
+
+	// --------------------
+	// Cooldowns
+	// --------------------
+	CUSSABILITYSYSTEM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Cooldown_Magic_Basic);
+}
