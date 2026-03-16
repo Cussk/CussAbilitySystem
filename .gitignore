@@ -72,3 +72,6 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# Local engine config may contain machine-specific or sensitive values
+Config/DefaultEngine.ini
