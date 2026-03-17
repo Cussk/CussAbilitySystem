@@ -57,6 +57,7 @@ void UCussAbilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(UCussAbilityComponent, GrantedAbilities);
 	DOREPLIFETIME(UCussAbilityComponent, OwnedTags);
 	DOREPLIFETIME(UCussAbilityComponent, ActiveEffects);
+	DOREPLIFETIME(UCussAbilityComponent, CooldownGroupStates);
 }
 
 void UCussAbilityComponent::GrantAbility(UCussAbilityData* AbilityData, int32 AbilityLevel, FGameplayTag InputTag)
@@ -184,12 +185,18 @@ bool UCussAbilityComponent::IsAbilityOnCooldown(FGameplayTag AbilityTag) const
 float UCussAbilityComponent::GetRemainingCooldown(FGameplayTag AbilityTag) const
 {
 	const FCussGrantedAbilitySpec* Spec = FindGrantedAbilityByTag(AbilityTag);
-	if (!Spec || !GetWorld())
+	if (!Spec || !Spec->AbilityData || !GetWorld())
 	{
 		return 0.f;
 	}
 
-	return FMath::Max(0.f, Spec->CooldownEndTime - GetWorld()->GetTimeSeconds());
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+	const float AbilityRemaining = FMath::Max(0.f, Spec->CooldownEndTime - CurrentTime);
+	const float GroupRemaining = Spec->AbilityData->CooldownGroupTag.IsValid()
+		? FMath::Max(0.f, GetCooldownGroupEndTime(Spec->AbilityData->CooldownGroupTag) - CurrentTime)
+		: 0.f;
+
+	return FMath::Max(AbilityRemaining, GroupRemaining);
 }
 
 bool UCussAbilityComponent::HasMatchingOwnedTag(FGameplayTag Tag) const
@@ -262,12 +269,27 @@ bool UCussAbilityComponent::CheckCosts(UCussAbilityData* AbilityData) const
 
 bool UCussAbilityComponent::CheckCooldown(const FCussGrantedAbilitySpec& Spec) const
 {
-	if (!GetWorld())
+	if (!GetWorld() || !Spec.AbilityData)
 	{
 		return false;
 	}
 
-	return GetWorld()->GetTimeSeconds() >= Spec.CooldownEndTime;
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+	if (CurrentTime < Spec.CooldownEndTime)
+	{
+		return false;
+	}
+
+	if (Spec.AbilityData->CooldownGroupTag.IsValid())
+	{
+		if (CurrentTime < GetCooldownGroupEndTime(Spec.AbilityData->CooldownGroupTag))
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 bool UCussAbilityComponent::CheckOwnerTags(UCussAbilityData* AbilityData) const
@@ -345,7 +367,13 @@ void UCussAbilityComponent::StartCooldown(FCussGrantedAbilitySpec& Spec)
 		return;
 	}
 
-	Spec.CooldownEndTime = GetWorld()->GetTimeSeconds() + Spec.AbilityData->CooldownSeconds;
+	const float CooldownEndTime = GetWorld()->GetTimeSeconds() + Spec.AbilityData->CooldownSeconds;
+	Spec.CooldownEndTime = CooldownEndTime;
+
+	if (Spec.AbilityData->CooldownGroupTag.IsValid())
+	{
+		SetCooldownGroupEndTime(Spec.AbilityData->CooldownGroupTag, CooldownEndTime);
+	}
 }
 
 void UCussAbilityComponent::ResolveAndApplyEffects(UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation)
@@ -467,21 +495,31 @@ void UCussAbilityComponent::ApplyEffectToResolvedTarget(UCussAbilityData* Abilit
 		return;
 	}
 
+	FCussEffectContext EffectContext;
+	EffectContext.SourceActor = GetOwner();
+	EffectContext.TargetActor = ResolvedTarget;
+	EffectContext.SourceAbilityData = AbilityData;
+	EffectContext.AbilityTag = AbilityData->AbilityTag;
+	EffectContext.EventLocation = !TargetLocation.IsNearlyZero() ? TargetLocation : ResolvedTarget->GetActorLocation();
+	EffectContext.ResolvedMagnitude = EffectDef.Magnitude;
+	EffectContext.AbilityLevel = 1;
+
 	if (EffectDef.Duration > 0.f)
 	{
 		if (UCussAbilityComponent* TargetAbilityComp = GetAbilityComponent(ResolvedTarget))
 		{
-			TargetAbilityComp->AddActiveEffectFromSource(GetOwner(), AbilityData, EffectDef);
+			TargetAbilityComp->AddActiveEffectFromContext(EffectContext, EffectDef);
 		}
 		return;
 	}
 
-	ApplyInstantEffectFromSource(GetOwner(), AbilityData, EffectDef, ResolvedTarget, TargetLocation);
+	ApplyInstantEffectFromContext(EffectContext, EffectDef);
 }
 
-void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* TargetActor, const FVector& EventLocation)
+void UCussAbilityComponent::ApplyInstantEffectFromContext(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef)
 {
-	if (!AbilityData || !TargetActor)
+	AActor* TargetActor = EffectContext.TargetActor.Get();
+	if (!TargetActor)
 	{
 		return;
 	}
@@ -497,7 +535,7 @@ void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, UC
 	case ECussAbilityEffectType::Damage:
 		if (TargetStats)
 		{
-			AppliedMagnitude = -FMath::Abs(EffectDef.Magnitude);
+			AppliedMagnitude = -FMath::Abs(EffectContext.ResolvedMagnitude);
 			TargetStats->ModifyStat(EffectDef.AffectedStatTag, AppliedMagnitude, true);
 		}
 		break;
@@ -505,7 +543,7 @@ void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, UC
 	case ECussAbilityEffectType::Heal:
 		if (TargetStats)
 		{
-			AppliedMagnitude = FMath::Abs(EffectDef.Magnitude);
+			AppliedMagnitude = FMath::Abs(EffectContext.ResolvedMagnitude);
 			TargetStats->ModifyStat(EffectDef.AffectedStatTag, AppliedMagnitude, true);
 		}
 		break;
@@ -513,7 +551,7 @@ void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, UC
 	case ECussAbilityEffectType::ModifyStat:
 		if (TargetStats)
 		{
-			AppliedMagnitude = EffectDef.Magnitude;
+			AppliedMagnitude = EffectContext.ResolvedMagnitude;
 			TargetStats->ModifyStat(EffectDef.AffectedStatTag, AppliedMagnitude, true);
 		}
 		break;
@@ -539,26 +577,52 @@ void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, UC
 
 	if (TargetAbilityComp)
 	{
-		TargetAbilityComp->BroadcastEvent(SourceActor, TargetActor, AbilityData->AbilityTag, ECussAbilityEventResult::EffectApplied, AppliedMagnitude, EventLocation, AbilityData->ImpactCueTag, AppliedTags);
+		TargetAbilityComp->BroadcastEvent(
+			EffectContext.SourceActor.Get(),
+			TargetActor,
+			EffectContext.AbilityTag,
+			ECussAbilityEventResult::EffectApplied,
+			AppliedMagnitude,
+			EffectContext.EventLocation,
+			EffectContext.SourceAbilityData ? EffectContext.SourceAbilityData->ImpactCueTag : FGameplayTag(),
+			AppliedTags);
 	}
 }
 
-void UCussAbilityComponent::AddActiveEffectFromSource(AActor* SourceActor, UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef)
+void UCussAbilityComponent::AddActiveEffectFromContext(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef)
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || !AbilityData || !GetWorld())
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !GetWorld())
 	{
 		return;
 	}
 
+	// Phase 2B: stacking / refresh
+	if (FCussActiveEffect* Existing = FindMatchingActiveEffect(EffectContext, EffectDef))
+	{
+		switch (EffectDef.StackingPolicy)
+		{
+		case ECussEffectStackingPolicy::RefreshDuration:
+			RefreshActiveEffectDuration(*Existing);
+			return;
+
+		case ECussEffectStackingPolicy::RejectNew:
+			return;
+
+		case ECussEffectStackingPolicy::AddNew:
+		default:
+			break;
+		}
+	}
+
 	FCussActiveEffect NewEffect;
 	NewEffect.EffectId = FGuid::NewGuid();
-	NewEffect.AbilityTag = AbilityData->AbilityTag;
-	NewEffect.SourceAbilityData = AbilityData;
-	NewEffect.SourceActor = SourceActor;
+	NewEffect.AbilityTag = EffectContext.AbilityTag;
+	NewEffect.SourceAbilityData = EffectContext.SourceAbilityData;
+	NewEffect.SourceActor = EffectContext.SourceActor;
 	NewEffect.TargetActor = GetOwner();
 	NewEffect.EffectType = EffectDef.EffectType;
 	NewEffect.ModifiedStatTag = EffectDef.AffectedStatTag;
-	NewEffect.Magnitude = EffectDef.Magnitude;
+	NewEffect.Magnitude = EffectContext.ResolvedMagnitude;
 	NewEffect.Duration = EffectDef.Duration;
 	NewEffect.Period = EffectDef.Period;
 	NewEffect.StartTime = GetWorld()->GetTimeSeconds();
@@ -572,28 +636,33 @@ void UCussAbilityComponent::AddActiveEffectFromSource(AActor* SourceActor, UCuss
 		AddOwnedTag(EffectDef.GrantedTag);
 	}
 
+	// 🔹 APPLY INITIAL STAT MODIFIER (for buffs)
+	if (EffectDef.EffectType == ECussAbilityEffectType::ModifyStat)
+	{
+		if (UCussStatComponent* Stats = GetStatComponent(GetOwner()))
+		{
+			Stats->ModifyStat(EffectDef.AffectedStatTag, NewEffect.Magnitude, true);
+		}
+	}
+
 	ActiveEffects.Add(NewEffect);
 
-	FTimerHandle DurationHandle;
-	GetWorld()->GetTimerManager().SetTimer(
-		DurationHandle,
-		FTimerDelegate::CreateUObject(this, &UCussAbilityComponent::HandleEffectExpired, NewEffect.EffectId),
-		EffectDef.Duration,
-		false);
-	EffectDurationTimers.Add(NewEffect.EffectId, DurationHandle);
+	ResetDurationTimer(NewEffect);
 
 	if (NewEffect.bPeriodic)
 	{
-		FTimerHandle PeriodHandle;
-		GetWorld()->GetTimerManager().SetTimer(
-			PeriodHandle,
-			FTimerDelegate::CreateUObject(this, &UCussAbilityComponent::HandleEffectPeriod, NewEffect.EffectId),
-			EffectDef.Period,
-			true);
-		EffectPeriodTimers.Add(NewEffect.EffectId, PeriodHandle);
+		ResetPeriodTimer(NewEffect);
 	}
 
-	BroadcastEvent(SourceActor, GetOwner(), AbilityData->AbilityTag, ECussAbilityEventResult::EffectAdded, 0.f, GetOwner()->GetActorLocation(), AbilityData->ImpactCueTag, NewEffect.GrantedTags);
+	BroadcastEvent(
+		EffectContext.SourceActor.Get(),
+		GetOwner(),
+		EffectContext.AbilityTag,
+		ECussAbilityEventResult::EffectAdded,
+		0.f,
+		GetOwner()->GetActorLocation(),
+		EffectContext.SourceAbilityData ? EffectContext.SourceAbilityData->ImpactCueTag : FGameplayTag(),
+		NewEffect.GrantedTags);
 }
 
 void UCussAbilityComponent::ApplyPeriodicEffectTick(const FCussActiveEffect& Effect)
@@ -665,6 +734,14 @@ void UCussAbilityComponent::RemoveActiveEffectById(FGuid EffectId)
 	for (const FGameplayTag& Tag : RemovedEffect.GrantedTags)
 	{
 		RemoveOwnedTag(Tag);
+	}
+	
+	if (RemovedEffect.EffectType == ECussAbilityEffectType::ModifyStat)
+	{
+		if (UCussStatComponent* Stats = GetStatComponent(GetOwner()))
+		{
+			Stats->ModifyStat(RemovedEffect.ModifiedStatTag, -RemovedEffect.Magnitude, true);
+		}
 	}
 
 	ActiveEffects.RemoveAt(Index);
@@ -903,3 +980,123 @@ bool UCussAbilityComponent::AreActorsEnemies(const AActor* ActorA, const AActor*
 
 	return TeamA.IsValid() && TeamB.IsValid() && TeamA != TeamB;
 }
+
+float UCussAbilityComponent::GetCooldownGroupEndTime(FGameplayTag CooldownGroupTag) const
+{
+	if (!CooldownGroupTag.IsValid())
+	{
+		return 0.f;
+	}
+
+	const FCussCooldownGroupState* FoundState = CooldownGroupStates.FindByPredicate(
+		[&CooldownGroupTag](const FCussCooldownGroupState& State)
+		{
+			return State.CooldownGroupTag == CooldownGroupTag;
+		});
+
+	return FoundState ? FoundState->EndTime : 0.f;
+}
+
+void UCussAbilityComponent::SetCooldownGroupEndTime(FGameplayTag CooldownGroupTag, float EndTime)
+{
+	if (!CooldownGroupTag.IsValid())
+	{
+		return;
+	}
+
+	FCussCooldownGroupState* ExistingState = CooldownGroupStates.FindByPredicate(
+		[&CooldownGroupTag](const FCussCooldownGroupState& State)
+		{
+			return State.CooldownGroupTag == CooldownGroupTag;
+		});
+
+	if (ExistingState)
+	{
+		ExistingState->EndTime = EndTime;
+		return;
+	}
+
+	FCussCooldownGroupState NewState;
+	NewState.CooldownGroupTag = CooldownGroupTag;
+	NewState.EndTime = EndTime;
+	CooldownGroupStates.Add(NewState);
+}
+
+float UCussAbilityComponent::GetRemainingCooldownForGroup(FGameplayTag CooldownGroupTag) const
+{
+	if (!GetWorld() || !CooldownGroupTag.IsValid())
+	{
+		return 0.f;
+	}
+
+	return FMath::Max(0.f, GetCooldownGroupEndTime(CooldownGroupTag) - GetWorld()->GetTimeSeconds());
+}
+
+FCussActiveEffect* UCussAbilityComponent::FindMatchingActiveEffect(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef)
+{
+	return ActiveEffects.FindByPredicate(
+		[&](const FCussActiveEffect& Effect)
+		{
+			return Effect.AbilityTag == EffectContext.AbilityTag
+				&& Effect.EffectType == EffectDef.EffectType
+				&& Effect.ModifiedStatTag == EffectDef.AffectedStatTag;
+		});
+}
+
+void UCussAbilityComponent::RefreshActiveEffectDuration(FCussActiveEffect& ActiveEffect)
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	ActiveEffect.StartTime = GetWorld()->GetTimeSeconds();
+	ActiveEffect.EndTime = ActiveEffect.StartTime + ActiveEffect.Duration;
+
+	ResetDurationTimer(ActiveEffect);
+}
+
+void UCussAbilityComponent::ResetDurationTimer(const FCussActiveEffect& ActiveEffect)
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (FTimerHandle* Existing = EffectDurationTimers.Find(ActiveEffect.EffectId))
+	{
+		GetWorld()->GetTimerManager().ClearTimer(*Existing);
+	}
+
+	FTimerHandle NewHandle;
+	GetWorld()->GetTimerManager().SetTimer(
+		NewHandle,
+		FTimerDelegate::CreateUObject(this, &UCussAbilityComponent::HandleEffectExpired, ActiveEffect.EffectId),
+		ActiveEffect.Duration,
+		false);
+
+	EffectDurationTimers.Add(ActiveEffect.EffectId, NewHandle);
+}
+
+void UCussAbilityComponent::ResetPeriodTimer(const FCussActiveEffect& ActiveEffect)
+{
+	if (!GetWorld() || !ActiveEffect.bPeriodic)
+	{
+		return;
+	}
+
+	if (FTimerHandle* Existing = EffectPeriodTimers.Find(ActiveEffect.EffectId))
+	{
+		GetWorld()->GetTimerManager().ClearTimer(*Existing);
+	}
+
+	FTimerHandle NewHandle;
+	GetWorld()->GetTimerManager().SetTimer(
+		NewHandle,
+		FTimerDelegate::CreateUObject(this, &UCussAbilityComponent::HandleEffectPeriod, ActiveEffect.EffectId),
+		ActiveEffect.Period,
+		true);
+
+	EffectPeriodTimers.Add(ActiveEffect.EffectId, NewHandle);
+}
+

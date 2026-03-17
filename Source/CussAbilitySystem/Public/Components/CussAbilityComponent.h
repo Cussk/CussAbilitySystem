@@ -87,6 +87,9 @@ protected:
 
 	UPROPERTY(Replicated)
 	TArray<FCussActiveEffect> ActiveEffects;
+	
+	UPROPERTY(Replicated)
+	TArray<FCussCooldownGroupState> CooldownGroupStates;
 
 	UPROPERTY()
 	TObjectPtr<UCussStatComponent> StatComponent;
@@ -135,12 +138,12 @@ protected:
 	void ResolveAndApplyEffects(UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation);
 	/** Applies one effect definition to the resolved target as instant or duration-based gameplay. */
 	void ApplyEffectToResolvedTarget(UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* ResolvedTarget, const FVector& TargetLocation);
+	
+	/** Creates or updates an active effect on this component using the provided execution context and stacking rules. */
+	void AddActiveEffectFromContext(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef);
 
-	/** Applies an immediate effect instance from a source actor to a resolved target actor. */
-	void ApplyInstantEffectFromSource(AActor* SourceActor, UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* TargetActor, const FVector& EventLocation);
-	/** Creates a replicated active effect entry and starts its timers on the target component. */
-	void AddActiveEffectFromSource(AActor* SourceActor, UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef);
-
+	/** Applies a single instant effect using a fully resolved execution context. */
+	void ApplyInstantEffectFromContext(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef);
 	/** Executes a single periodic tick for an active effect already applied to this owner. */
 	void ApplyPeriodicEffectTick(const FCussActiveEffect& Effect);
 	/** Removes an active effect entry, clears timers, and strips granted tags. */
@@ -176,4 +179,20 @@ protected:
 	bool AreActorsEnemies(const AActor* ActorA, const AActor* ActorB) const;
 
 	void InitializeStartupOwnedTags();
+	
+	float GetCooldownGroupEndTime(FGameplayTag CooldownGroupTag) const;
+	void SetCooldownGroupEndTime(FGameplayTag CooldownGroupTag, float EndTime);
+	float GetRemainingCooldownForGroup(FGameplayTag CooldownGroupTag) const;
+
+	/** Finds an existing active effect that matches the provided context and definition for stacking/refresh behavior. */
+	FCussActiveEffect* FindMatchingActiveEffect(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef);
+
+	/** Refreshes an existing active effect's duration and resets its expiration timer. */
+	void RefreshActiveEffectDuration(FCussActiveEffect& ActiveEffect);
+
+	/** Resets the duration timer for an active effect. */
+	void ResetDurationTimer(const FCussActiveEffect& ActiveEffect);
+
+	/** Resets the periodic timer for an active effect. */
+	void ResetPeriodTimer(const FCussActiveEffect& ActiveEffect);
 };

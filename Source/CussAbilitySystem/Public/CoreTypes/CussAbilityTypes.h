@@ -1,4 +1,4 @@
-// Copyright Kyle Cuss and Cuss Programming 2026
+//Copyright Kyle Cuss and Cuss Programming 2026.
 
 #pragma once
 
@@ -9,7 +9,6 @@
 class AActor;
 class UCussAbilityData;
 
-/** Describes how an ability chooses the actor or location it will affect. */
 UENUM(BlueprintType)
 enum class ECussAbilityTargetMode : uint8
 {
@@ -21,7 +20,6 @@ enum class ECussAbilityTargetMode : uint8
 	AreaTarget
 };
 
-/** Restricts which kinds of actors can be considered valid targets. */
 UENUM(BlueprintType)
 enum class ECussAbilityTargetFilter : uint8
 {
@@ -33,7 +31,6 @@ enum class ECussAbilityTargetFilter : uint8
 	Any
 };
 
-/** Defines the type of gameplay change produced by an ability effect. */
 UENUM(BlueprintType)
 enum class ECussAbilityEffectType : uint8
 {
@@ -45,7 +42,6 @@ enum class ECussAbilityEffectType : uint8
 	RemoveTag
 };
 
-/** Identifies the outcome represented by a broadcast ability event. */
 UENUM(BlueprintType)
 enum class ECussAbilityEventResult : uint8
 {
@@ -59,7 +55,14 @@ enum class ECussAbilityEventResult : uint8
 	EffectRemoved
 };
 
-/** Declares a single stat resource cost that must be paid to activate an ability. */
+UENUM(BlueprintType)
+enum class ECussEffectStackingPolicy : uint8
+{
+	AddNew,
+	RefreshDuration,
+	RejectNew
+};
+
 USTRUCT(BlueprintType)
 struct FCussAbilityStatCost
 {
@@ -72,7 +75,6 @@ struct FCussAbilityStatCost
 	float Amount = 0.f;
 };
 
-/** Stores targeting metadata used by the current activation checks and future delivery logic. */
 USTRUCT(BlueprintType)
 struct FCussAbilityTargetingDef
 {
@@ -94,7 +96,6 @@ struct FCussAbilityTargetingDef
 	bool bAllowDeadTargets = false;
 };
 
-/** Declares a single effect instance that an ability can apply when it resolves. */
 USTRUCT(BlueprintType)
 struct FCussAbilityEffectDef
 {
@@ -120,9 +121,11 @@ struct FCussAbilityEffectDef
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	int32 MaxStacks = 1;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	ECussEffectStackingPolicy StackingPolicy = ECussEffectStackingPolicy::AddNew;
 };
 
-/** Stores the runtime grant state for one ability on an ability component. */
 USTRUCT(BlueprintType)
 struct FCussGrantedAbilitySpec
 {
@@ -140,14 +143,51 @@ struct FCussGrantedAbilitySpec
 	UPROPERTY()
 	float CooldownEndTime = 0.f;
 
-	/** Returns true when this grant references a valid ability asset. */
 	bool IsValid() const
 	{
 		return AbilityData != nullptr;
 	}
 };
 
-/** Tracks an active timed effect instance currently applied to an actor. */
+USTRUCT(BlueprintType)
+struct FCussCooldownGroupState
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FGameplayTag CooldownGroupTag;
+
+	UPROPERTY()
+	float EndTime = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FCussEffectContext
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	TWeakObjectPtr<AActor> SourceActor;
+
+	UPROPERTY(BlueprintReadOnly)
+	TWeakObjectPtr<AActor> TargetActor;
+
+	UPROPERTY(BlueprintReadOnly)
+	TObjectPtr<UCussAbilityData> SourceAbilityData = nullptr;
+
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTag AbilityTag;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector EventLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	float ResolvedMagnitude = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	int32 AbilityLevel = 1;
+};
+
 USTRUCT(BlueprintType)
 struct FCussActiveEffect
 {
@@ -196,10 +236,15 @@ struct FCussActiveEffect
 	int32 Stacks = 1;
 
 	UPROPERTY()
+	int32 MaxStacks = 1;
+
+	UPROPERTY()
+	ECussEffectStackingPolicy StackingPolicy = ECussEffectStackingPolicy::AddNew;
+
+	UPROPERTY()
 	bool bPeriodic = false;
 };
 
-/** Payload broadcast whenever the ability component reports an ability-related event. */
 USTRUCT(BlueprintType)
 struct FCussAbilityEvent
 {
