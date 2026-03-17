@@ -72,7 +72,7 @@ struct FCussAbilityStatCost
 	float Amount = 0.f;
 };
 
-/** Declares the targeting rules an ability must satisfy before it can activate. */
+/** Stores targeting metadata used by the current activation checks and future delivery logic. */
 USTRUCT(BlueprintType)
 struct FCussAbilityTargetingDef
 {
@@ -129,7 +129,7 @@ struct FCussGrantedAbilitySpec
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
-	TObjectPtr<const UCussAbilityData> AbilityData = nullptr;
+	TObjectPtr<UCussAbilityData> AbilityData = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	int32 AbilityLevel = 1;
@@ -160,7 +160,7 @@ struct FCussActiveEffect
 	FGameplayTag AbilityTag;
 
 	UPROPERTY()
-	TObjectPtr<const UCussAbilityData> SourceAbilityData = nullptr;
+	TObjectPtr<UCussAbilityData> SourceAbilityData = nullptr;
 
 	UPROPERTY()
 	TWeakObjectPtr<AActor> SourceActor;

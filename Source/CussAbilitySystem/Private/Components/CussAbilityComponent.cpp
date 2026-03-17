@@ -56,7 +56,7 @@ void UCussAbilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(UCussAbilityComponent, ActiveEffects);
 }
 
-void UCussAbilityComponent::GrantAbility(const UCussAbilityData* AbilityData, int32 AbilityLevel, FGameplayTag InputTag)
+void UCussAbilityComponent::GrantAbility(UCussAbilityData* AbilityData, int32 AbilityLevel, FGameplayTag InputTag)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority() || !AbilityData)
 	{
@@ -226,7 +226,7 @@ bool UCussAbilityComponent::CanActivateAbility(const FCussGrantedAbilitySpec& Sp
 		&& ValidateTargeting(Spec.AbilityData, OptionalTargetActor, TargetLocation);
 }
 
-bool UCussAbilityComponent::CheckCosts(const UCussAbilityData* AbilityData) const
+bool UCussAbilityComponent::CheckCosts(UCussAbilityData* AbilityData) const
 {
 	if (!AbilityData || !StatComponent)
 	{
@@ -254,7 +254,7 @@ bool UCussAbilityComponent::CheckCooldown(const FCussGrantedAbilitySpec& Spec) c
 	return GetWorld()->GetTimeSeconds() >= Spec.CooldownEndTime;
 }
 
-bool UCussAbilityComponent::CheckOwnerTags(const UCussAbilityData* AbilityData) const
+bool UCussAbilityComponent::CheckOwnerTags(UCussAbilityData* AbilityData) const
 {
 	if (!AbilityData)
 	{
@@ -274,7 +274,7 @@ bool UCussAbilityComponent::CheckOwnerTags(const UCussAbilityData* AbilityData) 
 	return true;
 }
 
-bool UCussAbilityComponent::ValidateTargeting(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation) const
+bool UCussAbilityComponent::ValidateTargeting(UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation) const
 {
 	if (!AbilityData || !GetOwner())
 	{
@@ -321,7 +321,7 @@ void UCussAbilityComponent::ActivateAbilityInternal(FCussGrantedAbilitySpec& Spe
 	ResolveAndApplyEffects(Spec.AbilityData, OptionalTargetActor, TargetLocation);
 }
 
-void UCussAbilityComponent::CommitCosts(const UCussAbilityData* AbilityData)
+void UCussAbilityComponent::CommitCosts(UCussAbilityData* AbilityData)
 {
 	if (!AbilityData || !StatComponent)
 	{
@@ -344,7 +344,7 @@ void UCussAbilityComponent::StartCooldown(FCussGrantedAbilitySpec& Spec)
 	Spec.CooldownEndTime = GetWorld()->GetTimeSeconds() + Spec.AbilityData->CooldownSeconds;
 }
 
-void UCussAbilityComponent::ResolveAndApplyEffects(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation)
+void UCussAbilityComponent::ResolveAndApplyEffects(UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation)
 {
 	if (!AbilityData)
 	{
@@ -359,7 +359,7 @@ void UCussAbilityComponent::ResolveAndApplyEffects(const UCussAbilityData* Abili
 	}
 }
 
-void UCussAbilityComponent::ApplyEffectToResolvedTarget(const UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* ResolvedTarget, const FVector& TargetLocation)
+void UCussAbilityComponent::ApplyEffectToResolvedTarget(UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* ResolvedTarget, const FVector& TargetLocation)
 {
 	if (!AbilityData || !ResolvedTarget)
 	{
@@ -378,7 +378,7 @@ void UCussAbilityComponent::ApplyEffectToResolvedTarget(const UCussAbilityData* 
 	ApplyInstantEffectFromSource(GetOwner(), AbilityData, EffectDef, ResolvedTarget, TargetLocation);
 }
 
-void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, const UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* TargetActor, const FVector& EventLocation)
+void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* TargetActor, const FVector& EventLocation)
 {
 	if (!AbilityData || !TargetActor)
 	{
@@ -442,7 +442,7 @@ void UCussAbilityComponent::ApplyInstantEffectFromSource(AActor* SourceActor, co
 	}
 }
 
-void UCussAbilityComponent::AddActiveEffectFromSource(AActor* SourceActor, const UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef)
+void UCussAbilityComponent::AddActiveEffectFromSource(AActor* SourceActor, UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority() || !AbilityData || !GetWorld())
 	{
@@ -644,7 +644,7 @@ UCussStatComponent* UCussAbilityComponent::GetStatComponent(AActor* Actor) const
 	return Actor ? Actor->FindComponentByClass<UCussStatComponent>() : nullptr;
 }
 
-AActor* UCussAbilityComponent::ResolvePrimaryTarget(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor) const
+AActor* UCussAbilityComponent::ResolvePrimaryTarget(UCussAbilityData* AbilityData, AActor* OptionalTargetActor) const
 {
 	if (!AbilityData || !GetOwner())
 	{

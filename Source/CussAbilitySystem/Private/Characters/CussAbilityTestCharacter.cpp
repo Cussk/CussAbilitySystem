@@ -47,31 +47,10 @@ void ACussAbilityTestCharacter::SetupPlayerInputComponent(UInputComponent* Playe
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent);
-	if (!EnhancedInput)
-	{
-		return;
-	}
-
-	if (Ability1Action)
-	{
-		EnhancedInput->BindAction(Ability1Action, ETriggerEvent::Started, this, &ACussAbilityTestCharacter::HandleAbility1Pressed);
-	}
-
-	if (Ability2Action)
-	{
-		EnhancedInput->BindAction(Ability2Action, ETriggerEvent::Started, this, &ACussAbilityTestCharacter::HandleAbility2Pressed);
-	}
-
-	if (Ability3Action)
-	{
-		EnhancedInput->BindAction(Ability3Action, ETriggerEvent::Started, this, &ACussAbilityTestCharacter::HandleAbility3Pressed);
-	}
-
-	if (Ability4Action)
-	{
-		EnhancedInput->BindAction(Ability4Action, ETriggerEvent::Started, this, &ACussAbilityTestCharacter::HandleAbility4Pressed);
-	}
+	PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &ACussAbilityTestCharacter::HandleAbility1Pressed);
+	PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ACussAbilityTestCharacter::HandleAbility2Pressed);
+	PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ACussAbilityTestCharacter::HandleAbility3Pressed);
+	PlayerInputComponent->BindKey(EKeys::Four, IE_Pressed, this, &ACussAbilityTestCharacter::HandleAbility4Pressed);
 }
 
 void ACussAbilityTestCharacter::HandleAbility1Pressed()
@@ -103,6 +82,8 @@ void ACussAbilityTestCharacter::TryActivateInputTag(const FGameplayTag& InputTag
 
 	AActor* TargetActor = nullptr;
 	const FVector TargetLocation = FVector::ZeroVector;
+	
+	UE_LOG(LogTemp, Log, TEXT("Trying ability: %s"), *InputTag.ToString());
 
 	AbilityComponent->TryActivateAbilityByInputTag(InputTag, TargetActor, TargetLocation);
 }

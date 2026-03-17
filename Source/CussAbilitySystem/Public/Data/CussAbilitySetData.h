@@ -16,7 +16,7 @@ struct FCussAbilitySetEntry
 	GENERATED_BODY()
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
-	TObjectPtr<const UCussAbilityData> AbilityData = nullptr;
+	TObjectPtr<UCussAbilityData> AbilityData = nullptr;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	int32 AbilityLevel = 1;

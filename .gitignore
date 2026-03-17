@@ -75,3 +75,6 @@ DerivedDataCache/*
 
 # Local engine config may contain machine-specific or sensitive values
 Config/DefaultEngine.ini
+
+# Local Codex instructions
+AGENTS.md

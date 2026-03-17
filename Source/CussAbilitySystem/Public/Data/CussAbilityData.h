@@ -8,7 +8,7 @@
 #include "CussAbilitySystem/Public/CoreTypes/CussAbilityTypes.h"
 #include "CussAbilityData.generated.h"
 
-/** Data asset describing a single ability's tags, costs, targeting, and effects. */
+/** Data asset describing a single ability's tags, costs, targeting, and effects for the current slice. */
 UCLASS(BlueprintType)
 class CUSSABILITYSYSTEM_API UCussAbilityData : public UPrimaryDataAsset
 {
