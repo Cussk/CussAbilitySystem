@@ -5,9 +5,11 @@
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "CoreTypes/CussAbilityGameplayTags.h"
 #include "CussAbilitySystem/Public/Components/CussStatComponent.h"
 #include "CussAbilitySystem/Public/Data/CussAbilityData.h"
 #include "Data/CussAbilitySetData.h"
+#include "Engine/OverlapResult.h"
 #include "Net/UnrealNetwork.h"
 
 UCussAbilityComponent::UCussAbilityComponent()
@@ -23,6 +25,7 @@ void UCussAbilityComponent::BeginPlay()
 	
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
+		InitializeStartupOwnedTags();
 		GrantStartupAbilitySets();
 	}
 }
@@ -106,6 +109,19 @@ void UCussAbilityComponent::GrantStartupAbilitySets()
 	for (const UCussAbilitySetData* AbilitySet : StartupAbilitySets)
 	{
 		GrantAbilitySet(AbilitySet);
+	}
+}
+
+void UCussAbilityComponent::InitializeStartupOwnedTags()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	for (const FGameplayTag& Tag : StartupOwnedTags)
+	{
+		AddOwnedTag(Tag);
 	}
 }
 
@@ -281,26 +297,14 @@ bool UCussAbilityComponent::ValidateTargeting(UCussAbilityData* AbilityData, AAc
 		return false;
 	}
 
-	switch (AbilityData->Targeting.TargetMode)
+	if (AbilityData->Targeting.TargetMode == ECussAbilityTargetMode::Point)
 	{
-	case ECussAbilityTargetMode::Self:
-		return true;
-
-	case ECussAbilityTargetMode::Actor:
-		return OptionalTargetActor != nullptr;
-
-	case ECussAbilityTargetMode::Point:
 		return !TargetLocation.IsNearlyZero();
-
-	case ECussAbilityTargetMode::AreaSelf:
-		return true;
-
-	case ECussAbilityTargetMode::AreaTarget:
-		return OptionalTargetActor != nullptr || !TargetLocation.IsNearlyZero();
-
-	default:
-		return false;
 	}
+
+	TArray<AActor*> ResolvedTargets;
+	ResolveTargetsForAbility(AbilityData, OptionalTargetActor, TargetLocation, ResolvedTargets);
+	return ResolvedTargets.Num() > 0;
 }
 
 void UCussAbilityComponent::ActivateAbilityInternal(FCussGrantedAbilitySpec& Spec, AActor* OptionalTargetActor, const FVector& TargetLocation)
@@ -351,11 +355,108 @@ void UCussAbilityComponent::ResolveAndApplyEffects(UCussAbilityData* AbilityData
 		return;
 	}
 
-	AActor* ResolvedTarget = ResolvePrimaryTarget(AbilityData, OptionalTargetActor);
+	TArray<AActor*> ResolvedTargets;
+	ResolveTargetsForAbility(AbilityData, OptionalTargetActor, TargetLocation, ResolvedTargets);
 
-	for (const FCussAbilityEffectDef& EffectDef : AbilityData->Effects)
+	for (AActor* ResolvedTarget : ResolvedTargets)
 	{
-		ApplyEffectToResolvedTarget(AbilityData, EffectDef, ResolvedTarget, TargetLocation);
+		if (!ResolvedTarget)
+		{
+			continue;
+		}
+
+		for (const FCussAbilityEffectDef& EffectDef : AbilityData->Effects)
+		{
+			ApplyEffectToResolvedTarget(AbilityData, EffectDef, ResolvedTarget, TargetLocation);
+		}
+	}
+}
+
+void UCussAbilityComponent::ResolveTargetsForAbility(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation, TArray<AActor*>& OutTargets) const
+{
+	OutTargets.Reset();
+
+	if (!AbilityData || !GetOwner())
+	{
+		return;
+	}
+
+	switch (AbilityData->Targeting.TargetMode)
+	{
+	case ECussAbilityTargetMode::Self:
+		if (IsTargetValidForAbility(AbilityData, GetOwner()))
+		{
+			OutTargets.Add(GetOwner());
+		}
+		break;
+
+	case ECussAbilityTargetMode::Actor:
+		if (IsTargetValidForAbility(AbilityData, OptionalTargetActor))
+		{
+			OutTargets.Add(OptionalTargetActor);
+		}
+		break;
+
+	case ECussAbilityTargetMode::AreaSelf:
+		GatherAreaTargets(AbilityData, GetOwner()->GetActorLocation(), OutTargets);
+		break;
+
+	case ECussAbilityTargetMode::AreaTarget:
+		if (OptionalTargetActor)
+		{
+			GatherAreaTargets(AbilityData, OptionalTargetActor->GetActorLocation(), OutTargets);
+		}
+		else if (!TargetLocation.IsNearlyZero())
+		{
+			GatherAreaTargets(AbilityData, TargetLocation, OutTargets);
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+
+void UCussAbilityComponent::GatherAreaTargets(const UCussAbilityData* AbilityData, const FVector& Origin, TArray<AActor*>& OutTargets) const
+{
+	if (!AbilityData || !GetWorld() || AbilityData->Targeting.Radius <= 0.f)
+	{
+		return;
+	}
+
+	TArray<FOverlapResult> Overlaps;
+	FCollisionObjectQueryParams ObjectQueryParams;
+	ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CussAbilityAreaTargeting), false);
+
+	GetWorld()->OverlapMultiByObjectType(
+		Overlaps,
+		Origin,
+		FQuat::Identity,
+		ObjectQueryParams,
+		FCollisionShape::MakeSphere(AbilityData->Targeting.Radius),
+		QueryParams);
+
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* HitActor = Overlap.GetActor();
+		if (!HitActor)
+		{
+			continue;
+		}
+
+		if (OutTargets.Contains(HitActor))
+		{
+			continue;
+		}
+
+		if (!IsTargetValidForAbility(AbilityData, HitActor))
+		{
+			continue;
+		}
+
+		OutTargets.Add(HitActor);
 	}
 }
 
@@ -633,18 +734,17 @@ void UCussAbilityComponent::MulticastAbilityEvent_Implementation(const FCussAbil
 
 	OnAbilityEvent.Broadcast(EventData);
 }
-
-UCussAbilityComponent* UCussAbilityComponent::GetAbilityComponent(AActor* Actor) const
+UCussAbilityComponent* UCussAbilityComponent::GetAbilityComponent(const AActor* Actor) const
 {
 	return Actor ? Actor->FindComponentByClass<UCussAbilityComponent>() : nullptr;
 }
 
-UCussStatComponent* UCussAbilityComponent::GetStatComponent(AActor* Actor) const
+UCussStatComponent* UCussAbilityComponent::GetStatComponent(const AActor* Actor) const
 {
 	return Actor ? Actor->FindComponentByClass<UCussStatComponent>() : nullptr;
 }
 
-AActor* UCussAbilityComponent::ResolvePrimaryTarget(UCussAbilityData* AbilityData, AActor* OptionalTargetActor) const
+AActor* UCussAbilityComponent::ResolvePrimaryTarget(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor) const
 {
 	if (!AbilityData || !GetOwner())
 	{
@@ -666,3 +766,140 @@ AActor* UCussAbilityComponent::ResolvePrimaryTarget(UCussAbilityData* AbilityDat
 	}
 }
 
+bool UCussAbilityComponent::IsTargetValidForAbility(const UCussAbilityData* AbilityData, const AActor* CandidateTarget) const
+{
+	if (!AbilityData || !GetOwner() || !CandidateTarget)
+	{
+		return false;
+	}
+	
+	const UCussAbilityComponent* TargetAbilityComp = GetAbilityComponent(CandidateTarget);
+	const bool bIsDead = TargetAbilityComp && TargetAbilityComp->HasMatchingOwnedTag(CussAbilityTags::TAG_Status_Dead);
+
+	if (!AbilityData->Targeting.bAllowDeadTargets && bIsDead)
+	{
+		return false;
+	}
+
+	switch (AbilityData->Targeting.TargetFilter)
+	{
+	case ECussAbilityTargetFilter::Self:
+		if (CandidateTarget != GetOwner())
+		{
+			return false;
+		}
+		break;
+
+	case ECussAbilityTargetFilter::Ally:
+		if (!AreActorsAllies(GetOwner(), CandidateTarget))
+		{
+			return false;
+		}
+		break;
+
+	case ECussAbilityTargetFilter::Enemy:
+		if (!AreActorsEnemies(GetOwner(), CandidateTarget))
+		{
+			return false;
+		}
+		break;
+
+	case ECussAbilityTargetFilter::AnyLiving:
+		if (bIsDead)
+		{
+			return false;
+		}
+		break;
+
+	case ECussAbilityTargetFilter::Any:
+	case ECussAbilityTargetFilter::None:
+	default:
+		break;
+	}
+
+	if (AbilityData->Targeting.bRequireLineOfSight && CandidateTarget != GetOwner())
+	{
+		if (!HasLineOfSightToActor(CandidateTarget))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool UCussAbilityComponent::HasLineOfSightToActor(const AActor* OtherActor) const
+{
+	if (!GetOwner() || !OtherActor || !GetWorld())
+	{
+		return false;
+	}
+
+	FHitResult HitResult;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CussAbilityLOS), false);
+	QueryParams.AddIgnoredActor(GetOwner());
+	QueryParams.AddIgnoredActor(OtherActor);
+
+	const FVector Start = GetOwner()->GetActorLocation();
+	const FVector End = OtherActor->GetActorLocation();
+
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
+	return !bHit;
+}
+
+FGameplayTag UCussAbilityComponent::GetTeamTagForActor(const AActor* Actor) const
+{
+	if (!Actor)
+	{
+		return FGameplayTag();
+	}
+
+	const UCussAbilityComponent* OtherComp = GetAbilityComponent(Actor);
+	if (!OtherComp)
+	{
+		return FGameplayTag();
+	};
+
+	if (OtherComp->OwnedTags.HasTag(CussAbilityTags::TAG_Team_Player))
+	{
+		return CussAbilityTags::TAG_Team_Player;
+	}
+
+	if (OtherComp->OwnedTags.HasTag(CussAbilityTags::TAG_Team_Enemy))
+	{
+		return CussAbilityTags::TAG_Team_Enemy;
+	}
+
+	return FGameplayTag();
+}
+
+bool UCussAbilityComponent::AreActorsAllies(const AActor* ActorA, const AActor* ActorB) const
+{
+	if (!ActorA || !ActorB)
+	{
+		return false;
+	}
+
+	if (ActorA == ActorB)
+	{
+		return true;
+	}
+
+	const FGameplayTag TeamA = GetTeamTagForActor(ActorA);
+	const FGameplayTag TeamB = GetTeamTagForActor(ActorB);
+
+	return TeamA.IsValid() && TeamB.IsValid() && TeamA == TeamB;
+}
+
+bool UCussAbilityComponent::AreActorsEnemies(const AActor* ActorA, const AActor* ActorB) const
+{
+	if (!ActorA || !ActorB || ActorA == ActorB)
+	{
+		return false;
+	}
+
+	const FGameplayTag TeamA = GetTeamTagForActor(ActorA);
+	const FGameplayTag TeamB = GetTeamTagForActor(ActorB);
+
+	return TeamA.IsValid() && TeamB.IsValid() && TeamA != TeamB;
+}

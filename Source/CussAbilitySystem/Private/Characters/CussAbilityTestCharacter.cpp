@@ -81,11 +81,52 @@ void ACussAbilityTestCharacter::TryActivateInputTag(const FGameplayTag& InputTag
 	}
 
 	AActor* TargetActor = nullptr;
-	const FVector TargetLocation = FVector::ZeroVector;
-	
-	UE_LOG(LogTemp, Log, TEXT("Trying ability: %s"), *InputTag.ToString());
+	FVector TargetLocation = FVector::ZeroVector;
+
+	TraceAbilityTarget(TargetActor, TargetLocation);
 
 	AbilityComponent->TryActivateAbilityByInputTag(InputTag, TargetActor, TargetLocation);
+}
+
+bool ACussAbilityTestCharacter::TraceAbilityTarget(AActor*& OutTargetActor, FVector& OutTargetLocation) const
+{
+	OutTargetActor = nullptr;
+	OutTargetLocation = FVector::ZeroVector;
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC || !GetWorld())
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const FVector TraceEnd = ViewLocation + (ViewRotation.Vector() * 5000.f);
+
+	FHitResult HitResult;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CussAbilityTargetTrace), false);
+	QueryParams.AddIgnoredActor(this);
+
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, ViewLocation, TraceEnd, ECC_Visibility, QueryParams);
+	
+	DrawDebugLine(GetWorld(), ViewLocation, TraceEnd, bHit ? FColor::Green : FColor::Red, false, 1.0f, 0, 1.5f);
+
+	if (bHit)
+	{
+		DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, 12.f, 12, FColor::Green, false, 1.0f);
+	}
+	
+	if (!bHit)
+	{
+		OutTargetLocation = TraceEnd;
+		return false;
+	}
+
+	OutTargetActor = HitResult.GetActor();
+	OutTargetLocation = HitResult.ImpactPoint;
+	return true;
 }
 
 void ACussAbilityTestCharacter::InitializeDefaultStats()

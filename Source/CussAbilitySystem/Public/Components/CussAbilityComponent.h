@@ -69,6 +69,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Cuss|Ability")
 	FCussAbilityEventDelegate OnAbilityEvent;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cuss|Ability")
+	FGameplayTagContainer StartupOwnedTags;
+
+	UFUNCTION(BlueprintCallable, Category="Cuss|Ability")
+	const FGameplayTagContainer& GetOwnedTags() const { return OwnedTags; }
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cuss|Ability")
 	TArray<TObjectPtr<UCussAbilitySetData>> StartupAbilitySets;
@@ -154,9 +160,20 @@ protected:
 	void BroadcastEvent(AActor* InstigatorActor, AActor* TargetActor, FGameplayTag AbilityTag, ECussAbilityEventResult Result, float Magnitude, const FVector& EventLocation, FGameplayTag CueTag, const FGameplayTagContainer& AppliedTags);
 
 	/** Finds the ability component on an arbitrary actor. */
-	UCussAbilityComponent* GetAbilityComponent(AActor* Actor) const;
+	UCussAbilityComponent* GetAbilityComponent(const AActor* Actor) const;
 	/** Finds the stat component on an arbitrary actor. */
-	UCussStatComponent* GetStatComponent(AActor* Actor) const;
+	UCussStatComponent* GetStatComponent(const AActor* Actor) const;
 	/** Resolves the primary actor target to use for the current targeting mode. */
-	AActor* ResolvePrimaryTarget(UCussAbilityData* AbilityData, AActor* OptionalTargetActor) const;
+	AActor* ResolvePrimaryTarget(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor) const;
+	
+	bool IsTargetValidForAbility(const UCussAbilityData* AbilityData, const AActor* CandidateTarget) const;
+	void ResolveTargetsForAbility(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation, TArray<AActor*>& OutTargets) const;
+	void GatherAreaTargets(const UCussAbilityData* AbilityData, const FVector& Origin, TArray<AActor*>& OutTargets) const;
+	bool HasLineOfSightToActor(const AActor* OtherActor) const;
+
+	FGameplayTag GetTeamTagForActor(const AActor* Actor) const;
+	bool AreActorsAllies(const AActor* ActorA, const AActor* ActorB) const;
+	bool AreActorsEnemies(const AActor* ActorA, const AActor* ActorB) const;
+
+	void InitializeStartupOwnedTags();
 };

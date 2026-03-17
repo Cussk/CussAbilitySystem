@@ -49,4 +49,10 @@ namespace CussAbilityTags
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Input_Ability_Secondary, "Input.Ability.Secondary", "Secondary Ability Input");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Input_Ability_Utility, "Input.Ability.Utility", "Utility Ability Input");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Input_Ability_Ultimate, "Input.Ability.Ultimate", "Ultimate Ability Input");
+	
+	// --------------------
+	// Teams
+	// --------------------
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Team_Player, "Team.Player", "Player Team");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Team_Enemy, "Team.Enemy", "Enemy Team");
 }

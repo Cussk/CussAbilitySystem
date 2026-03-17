@@ -69,4 +69,6 @@ protected:
 	void TryActivateInputTag(const FGameplayTag& InputTag);
 	/** Seeds the test character with baseline health, mana, and energy values. */
 	void InitializeDefaultStats();
+	
+	bool TraceAbilityTarget(AActor*& OutTargetActor, FVector& OutTargetLocation) const;
 };
