@@ -75,6 +75,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Cuss|Ability")
 	const FGameplayTagContainer& GetOwnedTags() const { return OwnedTags; }
 
+	/** Routes an authoritative projectile impact back through the component's standard effect resolution path. */
+	void HandleProjectileImpact(const FCussAbilityProjectileSpawnContext& ProjectileContext, AActor* ImpactActor, const FVector& ImpactLocation);
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cuss|Ability")
 	TArray<TObjectPtr<UCussAbilitySetData>> StartupAbilitySets;
@@ -118,6 +121,8 @@ protected:
 
 	/** Runs the full cooldown, cost, tag, and targeting checks for an activation attempt. */
 	bool CanActivateAbility(const FCussGrantedAbilitySpec& Spec, AActor* OptionalTargetActor, const FVector& TargetLocation) const;
+	/** Verifies the authored delivery configuration contains the minimum data needed to execute the ability. */
+	bool CheckDelivery(UCussAbilityData* AbilityData) const;
 	/** Verifies the owner can afford all stat costs required by the ability. */
 	bool CheckCosts(UCussAbilityData* AbilityData) const;
 	/** Verifies the ability's cooldown has expired. */
@@ -127,17 +132,23 @@ protected:
 	/** Validates the current basic target mode requirements for the provided actor or location. */
 	bool ValidateTargeting(UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation) const;
 
-	/** Commits a successful activation by broadcasting events, spending costs, and applying effects. */
+	/** Commits a successful activation by broadcasting events, spending costs, and routing through the authored delivery path. */
 	void ActivateAbilityInternal(FCussGrantedAbilitySpec& Spec, AActor* OptionalTargetActor, const FVector& TargetLocation);
 	/** Spends the configured stat costs for an ability activation. */
 	void CommitCosts(UCussAbilityData* AbilityData);
 	/** Starts the cooldown timer for a granted ability spec. */
 	void StartCooldown(FCussGrantedAbilitySpec& Spec);
+	/** Spawns the configured projectile delivery actor on the server and seeds it with explicit runtime state. */
+	void SpawnProjectileForAbility(const FCussGrantedAbilitySpec& Spec, AActor* OptionalTargetActor, const FVector& TargetLocation);
+	/** Builds the explicit runtime payload copied onto a new projectile instance for inspection and impact resolution. */
+	FCussAbilityProjectileSpawnContext BuildProjectileSpawnContext(const FCussGrantedAbilitySpec& Spec, const FVector& SpawnLocation, const FVector& LaunchDirection) const;
+	/** Resolves the world-space aim point used to derive the current projectile's launch direction. */
+	FVector ResolveProjectileAimLocation(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation) const;
 
-	/** Resolves the primary target and applies every effect defined by the ability asset. */
-	void ResolveAndApplyEffects(UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation);
-	/** Applies one effect definition to the resolved target as instant or duration-based gameplay. */
-	void ApplyEffectToResolvedTarget(UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* ResolvedTarget, const FVector& TargetLocation);
+	/** Resolves targets and applies the supplied explicit effect snapshot using the provided ability level. */
+	void ResolveAndApplyEffects(UCussAbilityData* AbilityData, const TArray<FCussAbilityEffectDef>& Effects, int32 AbilityLevel, AActor* OptionalTargetActor, const FVector& TargetLocation);
+	/** Builds a resolved execution context for one target and applies one effect using the provided ability level. */
+	void ApplyEffectToResolvedTarget(UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, int32 AbilityLevel, AActor* ResolvedTarget, const FVector& TargetLocation);
 	
 	/** Creates or updates an active effect on this component using the provided execution context and stacking rules. */
 	void AddActiveEffectFromContext(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef);

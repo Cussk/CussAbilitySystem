@@ -7,6 +7,7 @@
 #include "CussAbilityTypes.generated.h"
 
 class AActor;
+class ACussAbilityProjectile;
 class UCussAbilityData;
 
 UENUM(BlueprintType)
@@ -29,6 +30,14 @@ enum class ECussAbilityTargetFilter : uint8
 	Enemy,
 	AnyLiving,
 	Any
+};
+
+/** Selects whether an ability resolves immediately or spawns a delivery actor first. */
+UENUM(BlueprintType)
+enum class ECussAbilityDeliveryType : uint8
+{
+	Instant,
+	Projectile
 };
 
 UENUM(BlueprintType)
@@ -96,6 +105,31 @@ struct FCussAbilityTargetingDef
 	bool bAllowDeadTargets = false;
 };
 
+/** Authored projectile settings used by projectile-delivered abilities for the current slice. */
+USTRUCT(BlueprintType)
+struct FCussProjectileDeliveryDef
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	TSubclassOf<ACussAbilityProjectile> ProjectileClass = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	float InitialSpeed = 1200.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	float MaxLifetime = 5.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	float CollisionRadius = 16.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	bool bDestroyOnHit = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	bool bStopOnWorldHit = true;
+};
+
 USTRUCT(BlueprintType)
 struct FCussAbilityEffectDef
 {
@@ -124,6 +158,34 @@ struct FCussAbilityEffectDef
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	ECussEffectStackingPolicy StackingPolicy = ECussEffectStackingPolicy::AddNew;
+};
+
+/** Explicit runtime payload copied onto spawned projectiles so delivery state stays inspectable. */
+USTRUCT(BlueprintType)
+struct FCussAbilityProjectileSpawnContext
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	TObjectPtr<AActor> SourceActor = nullptr;
+
+	UPROPERTY(BlueprintReadOnly)
+	TObjectPtr<UCussAbilityData> SourceAbilityData = nullptr;
+
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTag AbilityTag;
+
+	UPROPERTY(BlueprintReadOnly)
+	TArray<FCussAbilityEffectDef> Effects;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector SpawnLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector LaunchDirection = FVector::ForwardVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	int32 AbilityLevel = 1;
 };
 
 USTRUCT(BlueprintType)

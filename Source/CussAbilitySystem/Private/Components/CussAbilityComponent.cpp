@@ -1,16 +1,17 @@
-// Copyright Kyle Cuss and Cuss Programming 2026
+//Copyright Kyle Cuss and Cuss Programming 2026.
 
-#include "CussAbilitySystem/Public/Components/CussAbilityComponent.h"
+#include "Components/CussAbilityComponent.h"
 
-#include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "Actors/CussAbilityProjectile.h"
+#include "Components/CussStatComponent.h"
 #include "CoreTypes/CussAbilityGameplayTags.h"
-#include "CussAbilitySystem/Public/Components/CussStatComponent.h"
-#include "CussAbilitySystem/Public/Data/CussAbilityData.h"
 #include "Data/CussAbilitySetData.h"
+#include "Data/CussAbilityData.h"
 #include "Engine/OverlapResult.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
 
 UCussAbilityComponent::UCussAbilityComponent()
 {
@@ -244,9 +245,25 @@ bool UCussAbilityComponent::CanActivateAbility(const FCussGrantedAbilitySpec& Sp
 	}
 
 	return CheckCooldown(Spec)
+		&& CheckDelivery(Spec.AbilityData)
 		&& CheckCosts(Spec.AbilityData)
 		&& CheckOwnerTags(Spec.AbilityData)
 		&& ValidateTargeting(Spec.AbilityData, OptionalTargetActor, TargetLocation);
+}
+
+bool UCussAbilityComponent::CheckDelivery(UCussAbilityData* AbilityData) const
+{
+	if (!AbilityData)
+	{
+		return false;
+	}
+
+	if (AbilityData->DeliveryType != ECussAbilityDeliveryType::Projectile)
+	{
+		return true;
+	}
+
+	return GetWorld() && AbilityData->ProjectileDelivery.ProjectileClass != nullptr;
 }
 
 bool UCussAbilityComponent::CheckCosts(UCussAbilityData* AbilityData) const
@@ -344,7 +361,13 @@ void UCussAbilityComponent::ActivateAbilityInternal(FCussGrantedAbilitySpec& Spe
 	StartCooldown(Spec);
 	BroadcastEvent(GetOwner(), OptionalTargetActor, Spec.AbilityData->AbilityTag, ECussAbilityEventResult::CooldownStarted, 0.f, TargetLocation, Spec.AbilityData->CastCueTag, FGameplayTagContainer());
 
-	ResolveAndApplyEffects(Spec.AbilityData, OptionalTargetActor, TargetLocation);
+	if (Spec.AbilityData->DeliveryType == ECussAbilityDeliveryType::Projectile)
+	{
+		SpawnProjectileForAbility(Spec, OptionalTargetActor, TargetLocation);
+		return;
+	}
+
+	ResolveAndApplyEffects(Spec.AbilityData, Spec.AbilityData->Effects, Spec.AbilityLevel, OptionalTargetActor, TargetLocation);
 }
 
 void UCussAbilityComponent::CommitCosts(UCussAbilityData* AbilityData)
@@ -376,7 +399,93 @@ void UCussAbilityComponent::StartCooldown(FCussGrantedAbilitySpec& Spec)
 	}
 }
 
-void UCussAbilityComponent::ResolveAndApplyEffects(UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation)
+void UCussAbilityComponent::HandleProjectileImpact(const FCussAbilityProjectileSpawnContext& ProjectileContext, AActor* ImpactActor, const FVector& ImpactLocation)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	if (!ProjectileContext.SourceAbilityData || ProjectileContext.SourceActor != GetOwner())
+	{
+		return;
+	}
+
+	ResolveAndApplyEffects(ProjectileContext.SourceAbilityData, ProjectileContext.Effects, ProjectileContext.AbilityLevel, ImpactActor, ImpactLocation);
+}
+
+void UCussAbilityComponent::SpawnProjectileForAbility(const FCussGrantedAbilitySpec& Spec, AActor* OptionalTargetActor, const FVector& TargetLocation)
+{
+	if (!GetOwner() || !GetWorld() || !Spec.AbilityData)
+	{
+		return;
+	}
+
+	const FCussProjectileDeliveryDef& ProjectileDef = Spec.AbilityData->ProjectileDelivery;
+	if (!ProjectileDef.ProjectileClass)
+	{
+		return;
+	}
+
+	const FVector SpawnLocation = GetOwner()->GetActorLocation();
+	FVector LaunchDirection = (ResolveProjectileAimLocation(Spec.AbilityData, OptionalTargetActor, TargetLocation) - SpawnLocation).GetSafeNormal();
+	if (LaunchDirection.IsNearlyZero())
+	{
+		LaunchDirection = GetOwner()->GetActorForwardVector().GetSafeNormal();
+	}
+
+	const FCussAbilityProjectileSpawnContext SpawnContext = BuildProjectileSpawnContext(Spec, SpawnLocation, LaunchDirection);
+	const FTransform SpawnTransform(LaunchDirection.Rotation(), SpawnLocation);
+	ACussAbilityProjectile* Projectile = GetWorld()->SpawnActorDeferred<ACussAbilityProjectile>(
+		ProjectileDef.ProjectileClass,
+		SpawnTransform,
+		GetOwner(),
+		GetOwner()->GetInstigator(),
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+
+	if (!Projectile)
+	{
+		return;
+	}
+
+	Projectile->InitializeProjectile(SpawnContext, ProjectileDef);
+	Projectile->FinishSpawning(SpawnTransform);
+}
+
+FCussAbilityProjectileSpawnContext UCussAbilityComponent::BuildProjectileSpawnContext(const FCussGrantedAbilitySpec& Spec, const FVector& SpawnLocation, const FVector& LaunchDirection) const
+{
+	FCussAbilityProjectileSpawnContext SpawnContext;
+	SpawnContext.SourceActor = GetOwner();
+	SpawnContext.SourceAbilityData = Spec.AbilityData;
+	SpawnContext.AbilityTag = Spec.AbilityData ? Spec.AbilityData->AbilityTag : FGameplayTag();
+	SpawnContext.Effects = Spec.AbilityData ? Spec.AbilityData->Effects : TArray<FCussAbilityEffectDef>();
+	SpawnContext.SpawnLocation = SpawnLocation;
+	SpawnContext.LaunchDirection = LaunchDirection;
+	SpawnContext.AbilityLevel = Spec.AbilityLevel;
+	return SpawnContext;
+}
+
+FVector UCussAbilityComponent::ResolveProjectileAimLocation(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation) const
+{
+	if (!GetOwner())
+	{
+		return TargetLocation;
+	}
+
+	if (AActor* PrimaryTarget = ResolvePrimaryTarget(AbilityData, OptionalTargetActor))
+	{
+		return PrimaryTarget->GetActorLocation();
+	}
+
+	if (!TargetLocation.IsNearlyZero())
+	{
+		return TargetLocation;
+	}
+
+	return GetOwner()->GetActorLocation() + (GetOwner()->GetActorForwardVector() * 1000.f);
+}
+
+void UCussAbilityComponent::ResolveAndApplyEffects(UCussAbilityData* AbilityData, const TArray<FCussAbilityEffectDef>& Effects, int32 AbilityLevel, AActor* OptionalTargetActor, const FVector& TargetLocation)
 {
 	if (!AbilityData)
 	{
@@ -393,9 +502,9 @@ void UCussAbilityComponent::ResolveAndApplyEffects(UCussAbilityData* AbilityData
 			continue;
 		}
 
-		for (const FCussAbilityEffectDef& EffectDef : AbilityData->Effects)
+		for (const FCussAbilityEffectDef& EffectDef : Effects)
 		{
-			ApplyEffectToResolvedTarget(AbilityData, EffectDef, ResolvedTarget, TargetLocation);
+			ApplyEffectToResolvedTarget(AbilityData, EffectDef, AbilityLevel, ResolvedTarget, TargetLocation);
 		}
 	}
 }
@@ -488,7 +597,7 @@ void UCussAbilityComponent::GatherAreaTargets(const UCussAbilityData* AbilityDat
 	}
 }
 
-void UCussAbilityComponent::ApplyEffectToResolvedTarget(UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* ResolvedTarget, const FVector& TargetLocation)
+void UCussAbilityComponent::ApplyEffectToResolvedTarget(UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, int32 AbilityLevel, AActor* ResolvedTarget, const FVector& TargetLocation)
 {
 	if (!AbilityData || !ResolvedTarget)
 	{
@@ -502,7 +611,7 @@ void UCussAbilityComponent::ApplyEffectToResolvedTarget(UCussAbilityData* Abilit
 	EffectContext.AbilityTag = AbilityData->AbilityTag;
 	EffectContext.EventLocation = !TargetLocation.IsNearlyZero() ? TargetLocation : ResolvedTarget->GetActorLocation();
 	EffectContext.ResolvedMagnitude = EffectDef.Magnitude;
-	EffectContext.AbilityLevel = 1;
+	EffectContext.AbilityLevel = AbilityLevel;
 
 	if (EffectDef.Duration > 0.f)
 	{
@@ -596,7 +705,6 @@ void UCussAbilityComponent::AddActiveEffectFromContext(const FCussEffectContext&
 		return;
 	}
 
-	// Phase 2B: stacking / refresh
 	if (FCussActiveEffect* Existing = FindMatchingActiveEffect(EffectContext, EffectDef))
 	{
 		switch (EffectDef.StackingPolicy)
@@ -636,7 +744,6 @@ void UCussAbilityComponent::AddActiveEffectFromContext(const FCussEffectContext&
 		AddOwnedTag(EffectDef.GrantedTag);
 	}
 
-	// 🔹 APPLY INITIAL STAT MODIFIER (for buffs)
 	if (EffectDef.EffectType == ECussAbilityEffectType::ModifyStat)
 	{
 		if (UCussStatComponent* Stats = GetStatComponent(GetOwner()))

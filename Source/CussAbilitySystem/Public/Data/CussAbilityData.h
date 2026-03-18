@@ -1,14 +1,14 @@
-// Copyright Kyle Cuss and Cuss Programming 2026
+//Copyright Kyle Cuss and Cuss Programming 2026.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
-#include "CussAbilitySystem/Public/CoreTypes/CussAbilityTypes.h"
+#include "CoreTypes/CussAbilityTypes.h"
 #include "CussAbilityData.generated.h"
 
-/** Data asset describing a single ability's tags, costs, targeting, and effects for the current slice. */
+/** Data asset describing a single ability's tags, delivery, costs, targeting, and effects for the current slice. */
 UCLASS(BlueprintType)
 class CUSSABILITYSYSTEM_API UCussAbilityData : public UPrimaryDataAsset
 {
@@ -35,6 +35,12 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	FCussAbilityTargetingDef Targeting;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Delivery")
+	ECussAbilityDeliveryType DeliveryType = ECussAbilityDeliveryType::Instant;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Delivery", meta=(EditCondition="DeliveryType == ECussAbilityDeliveryType::Projectile", EditConditionHides))
+	FCussProjectileDeliveryDef ProjectileDelivery;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	TArray<FCussAbilityEffectDef> Effects;
