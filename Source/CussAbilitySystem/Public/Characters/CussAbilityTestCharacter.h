@@ -8,6 +8,7 @@
 #include "CussAbilityTestCharacter.generated.h"
 
 class UCussAbilityComponent;
+class UCussAbilityDebugComponent;
 class UCussStatComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -19,7 +20,7 @@ class CUSSABILITYSYSTEM_API ACussAbilityTestCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
-	/** Creates the default ability and stat components used by the test pawn. */
+	/** Creates the default ability, debug, and stat components used by the test pawn. */
 	ACussAbilityTestCharacter();
 
 protected:
@@ -30,6 +31,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Cuss|Components")
 	TObjectPtr<UCussAbilityComponent> AbilityComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Cuss|Components")
+	TObjectPtr<UCussAbilityDebugComponent> AbilityDebugComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Cuss|Components")
 	TObjectPtr<UCussStatComponent> StatComponent;

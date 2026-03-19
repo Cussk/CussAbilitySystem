@@ -6,6 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
 #include "CoreTypes/CussAbilityTypes.h"
+#include "Data/CussAbilityDebugTypes.h"
 #include "CussAbilityComponent.generated.h"
 
 class UCussAbilityData;
@@ -13,6 +14,9 @@ class UCussAbilitySetData;
 class UCussStatComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCussAbilityEventDelegate, const FCussAbilityEvent&, EventData);
+DECLARE_MULTICAST_DELEGATE_OneParam(FCussAbilityActivationResultViewDelegate, const FCussAbilityActivationResultView&);
+DECLARE_MULTICAST_DELEGATE(FCussAbilityDebugRefreshDelegate);
+DECLARE_MULTICAST_DELEGATE_OneParam(FCussCombatLogEntryDelegate, const FCussCombatLogEntry&);
 
 /** Current vertical-slice ability component that grants abilities, validates activations, and applies effects. */
 UCLASS(ClassGroup=(Cuss), meta=(BlueprintSpawnableComponent))
@@ -69,11 +73,28 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Cuss|Ability")
 	FCussAbilityEventDelegate OnAbilityEvent;
 
+	/** Broadcasts explicit activation success and failure results for local debug presentation. */
+	FCussAbilityActivationResultViewDelegate OnAbilityActivationResult;
+	/** Broadcasts that granted slot, cooldown, or blocked hotbar state should be refreshed. */
+	FCussAbilityDebugRefreshDelegate OnAbilitySlotsChanged;
+	/** Broadcasts that the active-effect presentation snapshot should be refreshed. */
+	FCussAbilityDebugRefreshDelegate OnActiveEffectsChanged;
+	/** Broadcasts that the owned-tag presentation snapshot should be refreshed. */
+	FCussAbilityDebugRefreshDelegate OnOwnedTagsChanged;
+	/** Broadcasts a new lightweight combat log entry for local debug presentation. */
+	FCussCombatLogEntryDelegate OnCombatLogEntryAdded;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cuss|Ability")
 	FGameplayTagContainer StartupOwnedTags;
 
 	UFUNCTION(BlueprintCallable, Category="Cuss|Ability")
 	const FGameplayTagContainer& GetOwnedTags() const { return OwnedTags; }
+	/** Copies a display-facing snapshot of the current granted hotbar slots and cooldown state. */
+	void GetAbilitySlotViews(TArray<FCussAbilitySlotView>& OutViews) const;
+	/** Copies a display-facing snapshot of the current active effects on this component owner. */
+	void GetActiveEffectViews(TArray<FCussActiveEffectView>& OutViews) const;
+	/** Copies the current owned gameplay tags for debug presentation code. */
+	void GetOwnedTags(FGameplayTagContainer& OutTags) const;
 
 	/** Routes an authoritative projectile impact back through the component's standard effect resolution path. */
 	void HandleProjectileImpact(const FCussAbilityProjectileSpawnContext& ProjectileContext, AActor* ImpactActor, const FVector& ImpactLocation);
@@ -82,16 +103,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cuss|Ability")
 	TArray<TObjectPtr<UCussAbilitySetData>> StartupAbilitySets;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_GrantedAbilities)
 	TArray<FCussGrantedAbilitySpec> GrantedAbilities;
 
 	UPROPERTY(ReplicatedUsing=OnRep_OwnedTags)
 	FGameplayTagContainer OwnedTags;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_ActiveEffects)
 	TArray<FCussActiveEffect> ActiveEffects;
 	
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_CooldownGroupStates)
 	TArray<FCussCooldownGroupState> CooldownGroupStates;
 
 	UPROPERTY()
@@ -109,8 +130,28 @@ protected:
 	void MulticastAbilityEvent(const FCussAbilityEvent& EventData);
 
 	UFUNCTION()
+	/** Receives replicated granted ability changes for local hotbar refresh. */
+	void OnRep_GrantedAbilities();
+
+	UFUNCTION()
 	/** Receives replicated owned tag changes. */
 	void OnRep_OwnedTags();
+
+	UFUNCTION()
+	/** Receives replicated active effect changes for local debug refresh. */
+	void OnRep_ActiveEffects();
+
+	UFUNCTION()
+	/** Receives replicated cooldown group changes for local hotbar refresh. */
+	void OnRep_CooldownGroupStates();
+
+	UFUNCTION(Client, Reliable)
+	/** Forwards an explicit activation result to the owning client for local debug presentation. */
+	void ClientReceiveActivationResult(const FCussAbilityActivationResultView& ActivationResult);
+
+	UFUNCTION(Client, Reliable)
+	/** Forwards a lightweight combat log entry to the owning client for local debug presentation. */
+	void ClientReceiveCombatLogEntry(const FCussCombatLogEntry& CombatLogEntry);
 
 	/** Looks up a granted ability spec by its ability tag. */
 	const FCussGrantedAbilitySpec* FindGrantedAbilityByTag(FGameplayTag AbilityTag) const;
@@ -144,6 +185,10 @@ protected:
 	FCussAbilityProjectileSpawnContext BuildProjectileSpawnContext(const FCussGrantedAbilitySpec& Spec, const FVector& SpawnLocation, const FVector& LaunchDirection) const;
 	/** Resolves the world-space aim point used to derive the current projectile's launch direction. */
 	FVector ResolveProjectileAimLocation(const UCussAbilityData* AbilityData, AActor* OptionalTargetActor, const FVector& TargetLocation) const;
+	/** Evaluates the current activation attempt and returns the most useful demo-facing failure reason. */
+	ECussAbilityActivationFailReason DetermineActivationFailure(const FCussGrantedAbilitySpec& Spec, AActor* OptionalTargetActor, const FVector& TargetLocation, FGameplayTag& OutRelatedTag, float& OutCooldownRemaining) const;
+	/** Builds a lightweight activation result view for validation messages and combat log output. */
+	FCussAbilityActivationResultView BuildActivationResultView(const UCussAbilityData* AbilityData, FGameplayTag AbilityTag, bool bSuccess, ECussAbilityActivationFailReason FailReason, FGameplayTag RelatedTag, float CooldownRemaining, const FText& Message) const;
 
 	/** Resolves targets and applies the supplied explicit effect snapshot using the provided ability level. */
 	void ResolveAndApplyEffects(UCussAbilityData* AbilityData, const TArray<FCussAbilityEffectDef>& Effects, int32 AbilityLevel, AActor* OptionalTargetActor, const FVector& TargetLocation);
@@ -157,8 +202,8 @@ protected:
 	void ApplyInstantEffectFromContext(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef);
 	/** Executes a single periodic tick for an active effect already applied to this owner. */
 	void ApplyPeriodicEffectTick(const FCussActiveEffect& Effect);
-	/** Removes an active effect entry, clears timers, and strips granted tags. */
-	void RemoveActiveEffectById(FGuid EffectId);
+	/** Removes an active effect entry, clears timers, strips granted tags, and notes whether it expired. */
+	void RemoveActiveEffectById(FGuid EffectId, bool bExpired = false);
 
 	/** Adds a gameplay tag to the component's owned tag container. */
 	void AddOwnedTag(FGameplayTag Tag);
@@ -172,6 +217,16 @@ protected:
 
 	/** Broadcasts a normalized ability event locally and across the network. */
 	void BroadcastEvent(AActor* InstigatorActor, AActor* TargetActor, FGameplayTag AbilityTag, ECussAbilityEventResult Result, float Magnitude, const FVector& EventLocation, FGameplayTag CueTag, const FGameplayTagContainer& AppliedTags);
+	/** Broadcasts an explicit activation result locally and to the owning client when needed. */
+	void EmitActivationResult(const FCussAbilityActivationResultView& ActivationResult);
+	/** Broadcasts a lightweight combat log entry locally and to the owning client when needed. */
+	void AddCombatLogEntry(ECussCombatLogEntryType EntryType, const FText& Message);
+	/** Broadcasts that the hotbar-facing slot snapshot should be refreshed. */
+	void NotifyAbilitySlotsChanged();
+	/** Broadcasts that the active-effect snapshot should be refreshed. */
+	void NotifyActiveEffectsChanged();
+	/** Broadcasts that the owned-tag snapshot should be refreshed. */
+	void NotifyOwnedTagsChanged();
 
 	/** Finds the ability component on an arbitrary actor. */
 	UCussAbilityComponent* GetAbilityComponent(const AActor* Actor) const;

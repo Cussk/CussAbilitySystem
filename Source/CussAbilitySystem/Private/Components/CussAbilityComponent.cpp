@@ -13,6 +13,205 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
+namespace
+{
+FText GetGameplayTagDisplayText(FGameplayTag Tag)
+{
+	if (!Tag.IsValid())
+	{
+		return FText::GetEmpty();
+	}
+
+	FString TagString = Tag.ToString();
+	FString Left;
+	FString Right;
+
+	if (TagString.Split(TEXT("."), &Left, &Right, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+	{
+		return FText::FromString(Right);
+	}
+
+	return FText::FromString(TagString);
+}
+
+FText GetAbilityDisplayText(const UCussAbilityData* AbilityData, FGameplayTag AbilityTag)
+{
+	if (AbilityData && !AbilityData->DisplayName.IsEmpty())
+	{
+		return AbilityData->DisplayName;
+	}
+
+	return GetGameplayTagDisplayText(AbilityTag);
+}
+
+FText GetActorDisplayText(const AActor* Actor)
+{
+	return Actor ? FText::FromString(Actor->GetName()) : FText::FromString(TEXT("World"));
+}
+
+FText GetEffectDisplayText(const FCussAbilityEffectDef& EffectDef, const UCussAbilityData* SourceAbilityData, FGameplayTag AbilityTag)
+{
+	if (EffectDef.GrantedTag.IsValid())
+	{
+		return GetGameplayTagDisplayText(EffectDef.GrantedTag);
+	}
+
+	switch (EffectDef.EffectType)
+	{
+	case ECussAbilityEffectType::Damage:
+		return FText::FromString(TEXT("Damage"));
+	case ECussAbilityEffectType::Heal:
+		return FText::FromString(TEXT("Heal"));
+	case ECussAbilityEffectType::ModifyStat:
+		return EffectDef.AffectedStatTag.IsValid()
+			? GetGameplayTagDisplayText(EffectDef.AffectedStatTag)
+			: FText::FromString(TEXT("Stat Effect"));
+	case ECussAbilityEffectType::ApplyTag:
+		return EffectDef.GrantedTag.IsValid()
+			? GetGameplayTagDisplayText(EffectDef.GrantedTag)
+			: FText::FromString(TEXT("Tag Applied"));
+	case ECussAbilityEffectType::RemoveTag:
+		return EffectDef.GrantedTag.IsValid()
+			? GetGameplayTagDisplayText(EffectDef.GrantedTag)
+			: FText::FromString(TEXT("Tag Removed"));
+	case ECussAbilityEffectType::None:
+	default:
+		return GetAbilityDisplayText(SourceAbilityData, AbilityTag);
+	}
+}
+
+int32 GetSlotIndexForInputTag(FGameplayTag InputTag)
+{
+	if (InputTag == CussAbilityTags::TAG_Input_Ability_Primary)
+	{
+		return 0;
+	}
+
+	if (InputTag == CussAbilityTags::TAG_Input_Ability_Secondary)
+	{
+		return 1;
+	}
+
+	if (InputTag == CussAbilityTags::TAG_Input_Ability_Utility)
+	{
+		return 2;
+	}
+
+	if (InputTag == CussAbilityTags::TAG_Input_Ability_Ultimate)
+	{
+		return 3;
+	}
+
+	return INDEX_NONE;
+}
+
+FText BuildActivationMessage(const UCussAbilityData* AbilityData, FGameplayTag AbilityTag, bool bSuccess, ECussAbilityActivationFailReason FailReason, FGameplayTag RelatedTag)
+{
+	const FText AbilityName = GetAbilityDisplayText(AbilityData, AbilityTag);
+
+	if (bSuccess)
+	{
+		return FText::Format(NSLOCTEXT("CussAbility", "ActivationSucceeded", "{0} activated"), AbilityName);
+	}
+
+	switch (FailReason)
+	{
+	case ECussAbilityActivationFailReason::NotGranted:
+		return FText::Format(NSLOCTEXT("CussAbility", "ActivationNotGranted", "{0} failed: Not Granted"), AbilityName);
+	case ECussAbilityActivationFailReason::OnCooldown:
+		return FText::Format(NSLOCTEXT("CussAbility", "ActivationOnCooldown", "{0} failed: On Cooldown"), AbilityName);
+	case ECussAbilityActivationFailReason::InsufficientResources:
+		return RelatedTag.IsValid()
+			? FText::Format(NSLOCTEXT("CussAbility", "ActivationMissingResource", "{0} failed: Missing {1}"), AbilityName, GetGameplayTagDisplayText(RelatedTag))
+			: FText::Format(NSLOCTEXT("CussAbility", "ActivationMissingResources", "{0} failed: Missing Resources"), AbilityName);
+	case ECussAbilityActivationFailReason::BlockedByTags:
+		return RelatedTag.IsValid()
+			? FText::Format(NSLOCTEXT("CussAbility", "ActivationBlockedTag", "{0} failed: Blocked by tag {1}"), AbilityName, GetGameplayTagDisplayText(RelatedTag))
+			: FText::Format(NSLOCTEXT("CussAbility", "ActivationBlockedTags", "{0} failed: Blocked by Tags"), AbilityName);
+	case ECussAbilityActivationFailReason::MissingRequiredTags:
+		return RelatedTag.IsValid()
+			? FText::Format(NSLOCTEXT("CussAbility", "ActivationMissingTag", "{0} failed: Missing tag {1}"), AbilityName, GetGameplayTagDisplayText(RelatedTag))
+			: FText::Format(NSLOCTEXT("CussAbility", "ActivationMissingTags", "{0} failed: Missing Required Tags"), AbilityName);
+	case ECussAbilityActivationFailReason::InvalidTarget:
+		return FText::Format(NSLOCTEXT("CussAbility", "ActivationInvalidTarget", "{0} failed: Invalid Target"), AbilityName);
+	case ECussAbilityActivationFailReason::OutOfRange:
+		return FText::Format(NSLOCTEXT("CussAbility", "ActivationOutOfRange", "{0} failed: Out Of Range"), AbilityName);
+	case ECussAbilityActivationFailReason::InvalidContext:
+		return FText::Format(NSLOCTEXT("CussAbility", "ActivationInvalidContext", "{0} failed: Invalid Context"), AbilityName);
+	case ECussAbilityActivationFailReason::Unknown:
+	case ECussAbilityActivationFailReason::None:
+	default:
+		return FText::Format(NSLOCTEXT("CussAbility", "ActivationUnknownFailure", "{0} failed"), AbilityName);
+	}
+}
+
+FText BuildCooldownLogMessage(const UCussAbilityData* AbilityData)
+{
+	return FText::Format(NSLOCTEXT("CussAbility", "CooldownStarted", "{0} cooldown started"), GetAbilityDisplayText(AbilityData, AbilityData ? AbilityData->AbilityTag : FGameplayTag()));
+}
+
+FText BuildProjectileSpawnLogMessage(const UCussAbilityData* AbilityData)
+{
+	return FText::Format(NSLOCTEXT("CussAbility", "ProjectileSpawned", "{0} projectile spawned"), GetAbilityDisplayText(AbilityData, AbilityData ? AbilityData->AbilityTag : FGameplayTag()));
+}
+
+FText BuildProjectileImpactLogMessage(const UCussAbilityData* AbilityData, AActor* ImpactActor)
+{
+	return FText::Format(NSLOCTEXT("CussAbility", "ProjectileHit", "{0} hit {1}"), GetAbilityDisplayText(AbilityData, AbilityData ? AbilityData->AbilityTag : FGameplayTag()), GetActorDisplayText(ImpactActor));
+}
+
+FText BuildEffectLogMessage(const UCussAbilityData* AbilityData, const FCussAbilityEffectDef& EffectDef, AActor* TargetActor)
+{
+	const FText EffectName = GetEffectDisplayText(EffectDef, AbilityData, AbilityData ? AbilityData->AbilityTag : FGameplayTag());
+
+	if (EffectDef.Duration > 0.f)
+	{
+		return FText::Format(NSLOCTEXT("CussAbility", "EffectAppliedDuration", "{0} applied x1 for {1}s"), EffectName, FText::AsNumber(EffectDef.Duration));
+	}
+
+	switch (EffectDef.EffectType)
+	{
+	case ECussAbilityEffectType::Damage:
+		return FText::Format(NSLOCTEXT("CussAbility", "DamageApplied", "{0} damage applied to {1}"), GetAbilityDisplayText(AbilityData, AbilityData ? AbilityData->AbilityTag : FGameplayTag()), GetActorDisplayText(TargetActor));
+	case ECussAbilityEffectType::Heal:
+		return FText::Format(NSLOCTEXT("CussAbility", "HealApplied", "{0} heal applied to {1}"), GetAbilityDisplayText(AbilityData, AbilityData ? AbilityData->AbilityTag : FGameplayTag()), GetActorDisplayText(TargetActor));
+	case ECussAbilityEffectType::ModifyStat:
+		return FText::Format(NSLOCTEXT("CussAbility", "StatApplied", "{0} applied to {1}"), EffectName, GetActorDisplayText(TargetActor));
+	case ECussAbilityEffectType::ApplyTag:
+		return FText::Format(NSLOCTEXT("CussAbility", "TagApplied", "{0} applied to {1}"), EffectName, GetActorDisplayText(TargetActor));
+	case ECussAbilityEffectType::RemoveTag:
+		return FText::Format(NSLOCTEXT("CussAbility", "TagRemoved", "{0} removed from {1}"), EffectName, GetActorDisplayText(TargetActor));
+	case ECussAbilityEffectType::None:
+	default:
+		return FText::Format(NSLOCTEXT("CussAbility", "EffectApplied", "{0} applied"), EffectName);
+	}
+}
+
+FText BuildActiveEffectRemovedLogMessage(const FCussActiveEffect& ActiveEffect, bool bExpired)
+{
+	FGameplayTag DisplayTag;
+	TArray<FGameplayTag> GrantedTags;
+	ActiveEffect.GrantedTags.GetGameplayTagArray(GrantedTags);
+
+	if (!GrantedTags.IsEmpty())
+	{
+		DisplayTag = GrantedTags[0];
+	}
+	else
+	{
+		DisplayTag = ActiveEffect.AbilityTag;
+	}
+
+	const FText EffectName = GetGameplayTagDisplayText(DisplayTag).IsEmpty()
+		? GetAbilityDisplayText(ActiveEffect.SourceAbilityData, ActiveEffect.AbilityTag)
+		: GetGameplayTagDisplayText(DisplayTag);
+
+	return bExpired
+		? FText::Format(NSLOCTEXT("CussAbility", "EffectExpired", "{0} expired"), EffectName)
+		: FText::Format(NSLOCTEXT("CussAbility", "EffectRemoved", "{0} removed"), EffectName);
+}
+}
+
 UCussAbilityComponent::UCussAbilityComponent()
 {
 	SetIsReplicatedByDefault(true);
@@ -81,6 +280,7 @@ void UCussAbilityComponent::GrantAbility(UCussAbilityData* AbilityData, int32 Ab
 	NewSpec.CooldownEndTime = 0.f;
 
 	GrantedAbilities.Add(NewSpec);
+	NotifyAbilitySlotsChanged();
 }
 
 void UCussAbilityComponent::GrantAbilitySet(const UCussAbilitySetData* AbilitySet)
@@ -148,24 +348,72 @@ bool UCussAbilityComponent::TryActivateAbilityByTag(FGameplayTag AbilityTag, AAc
 	FCussGrantedAbilitySpec* Spec = FindGrantedAbilityByTagMutable(AbilityTag);
 	if (!Spec)
 	{
+		const FCussAbilityActivationResultView ActivationResult = BuildActivationResultView(
+			nullptr,
+			AbilityTag,
+			false,
+			ECussAbilityActivationFailReason::NotGranted,
+			FGameplayTag(),
+			0.f,
+			BuildActivationMessage(nullptr, AbilityTag, false, ECussAbilityActivationFailReason::NotGranted, FGameplayTag()));
+		EmitActivationResult(ActivationResult);
+		AddCombatLogEntry(ECussCombatLogEntryType::Validation, ActivationResult.Message);
 		BroadcastEvent(GetOwner(), OptionalTargetActor, AbilityTag, ECussAbilityEventResult::Failed, 0.f, TargetLocation, FGameplayTag(), FGameplayTagContainer());
 		return false;
 	}
 
 	if (!CanActivateAbility(*Spec, OptionalTargetActor, TargetLocation))
 	{
+		FGameplayTag RelatedTag;
+		float CooldownRemaining = 0.f;
+		const ECussAbilityActivationFailReason FailReason = DetermineActivationFailure(*Spec, OptionalTargetActor, TargetLocation, RelatedTag, CooldownRemaining);
+		const FCussAbilityActivationResultView ActivationResult = BuildActivationResultView(
+			Spec->AbilityData,
+			AbilityTag,
+			false,
+			FailReason,
+			RelatedTag,
+			CooldownRemaining,
+			BuildActivationMessage(Spec->AbilityData, AbilityTag, false, FailReason, RelatedTag));
+		EmitActivationResult(ActivationResult);
+		AddCombatLogEntry(ECussCombatLogEntryType::Validation, ActivationResult.Message);
 		BroadcastEvent(GetOwner(), OptionalTargetActor, AbilityTag, ECussAbilityEventResult::Failed, 0.f, TargetLocation, FGameplayTag(), FGameplayTagContainer());
 		return false;
 	}
 
 	ActivateAbilityInternal(*Spec, OptionalTargetActor, TargetLocation);
+	const FCussAbilityActivationResultView ActivationResult = BuildActivationResultView(
+		Spec->AbilityData,
+		AbilityTag,
+		true,
+		ECussAbilityActivationFailReason::None,
+		FGameplayTag(),
+		0.f,
+		BuildActivationMessage(Spec->AbilityData, AbilityTag, true, ECussAbilityActivationFailReason::None, FGameplayTag()));
+	EmitActivationResult(ActivationResult);
+	AddCombatLogEntry(ECussCombatLogEntryType::Activation, ActivationResult.Message);
 	return true;
 }
 
 bool UCussAbilityComponent::TryActivateAbilityByInputTag(FGameplayTag InputTag, AActor* OptionalTargetActor, FVector TargetLocation)
 {
 	const FCussGrantedAbilitySpec* Spec = FindGrantedAbilityByInputTag(InputTag);
-	return Spec && Spec->AbilityData ? TryActivateAbilityByTag(Spec->AbilityData->AbilityTag, OptionalTargetActor, TargetLocation) : false;
+	if (!Spec || !Spec->AbilityData)
+	{
+		const FCussAbilityActivationResultView ActivationResult = BuildActivationResultView(
+			nullptr,
+			FGameplayTag(),
+			false,
+			ECussAbilityActivationFailReason::NotGranted,
+			InputTag,
+			0.f,
+			FText::FromString(TEXT("Ability failed: Not Granted")));
+		EmitActivationResult(ActivationResult);
+		AddCombatLogEntry(ECussCombatLogEntryType::Validation, ActivationResult.Message);
+		return false;
+	}
+
+	return TryActivateAbilityByTag(Spec->AbilityData->AbilityTag, OptionalTargetActor, TargetLocation);
 }
 
 void UCussAbilityComponent::ServerTryActivateAbility_Implementation(FGameplayTag AbilityTag, AActor* OptionalTargetActor, FVector_NetQuantize TargetLocation)
@@ -173,8 +421,35 @@ void UCussAbilityComponent::ServerTryActivateAbility_Implementation(FGameplayTag
 	TryActivateAbilityByTag(AbilityTag, OptionalTargetActor, TargetLocation);
 }
 
+void UCussAbilityComponent::OnRep_GrantedAbilities()
+{
+	NotifyAbilitySlotsChanged();
+}
+
 void UCussAbilityComponent::OnRep_OwnedTags()
 {
+	NotifyOwnedTagsChanged();
+	NotifyAbilitySlotsChanged();
+}
+
+void UCussAbilityComponent::OnRep_ActiveEffects()
+{
+	NotifyActiveEffectsChanged();
+}
+
+void UCussAbilityComponent::OnRep_CooldownGroupStates()
+{
+	NotifyAbilitySlotsChanged();
+}
+
+void UCussAbilityComponent::ClientReceiveActivationResult_Implementation(const FCussAbilityActivationResultView& ActivationResult)
+{
+	OnAbilityActivationResult.Broadcast(ActivationResult);
+}
+
+void UCussAbilityComponent::ClientReceiveCombatLogEntry_Implementation(const FCussCombatLogEntry& CombatLogEntry)
+{
+	OnCombatLogEntryAdded.Broadcast(CombatLogEntry);
 }
 
 bool UCussAbilityComponent::IsAbilityOnCooldown(FGameplayTag AbilityTag) const
@@ -208,6 +483,75 @@ bool UCussAbilityComponent::HasMatchingOwnedTag(FGameplayTag Tag) const
 bool UCussAbilityComponent::HasAnyMatchingOwnedTags(const FGameplayTagContainer& Tags) const
 {
 	return OwnedTags.HasAny(Tags);
+}
+
+void UCussAbilityComponent::GetAbilitySlotViews(TArray<FCussAbilitySlotView>& OutViews) const
+{
+	OutViews.Reset();
+
+	for (int32 SlotIndex = 0; SlotIndex < 4; ++SlotIndex)
+	{
+		FCussAbilitySlotView SlotView;
+		SlotView.SlotIndex = SlotIndex;
+		OutViews.Add(SlotView);
+	}
+
+	for (const FCussGrantedAbilitySpec& Spec : GrantedAbilities)
+	{
+		FCussAbilitySlotView SlotView;
+		SlotView.SlotIndex = GetSlotIndexForInputTag(Spec.InputTag);
+		SlotView.AbilityTag = Spec.AbilityData ? Spec.AbilityData->AbilityTag : FGameplayTag();
+		SlotView.AbilityName = GetAbilityDisplayText(Spec.AbilityData, SlotView.AbilityTag);
+		SlotView.bIsGranted = Spec.IsValid();
+		SlotView.CooldownDuration = Spec.AbilityData ? Spec.AbilityData->CooldownSeconds : 0.f;
+		SlotView.CooldownRemaining = SlotView.AbilityTag.IsValid() ? GetRemainingCooldown(SlotView.AbilityTag) : 0.f;
+		SlotView.bIsOnCooldown = SlotView.CooldownRemaining > 0.f;
+		SlotView.bIsBlocked = Spec.AbilityData && (!CheckOwnerTags(Spec.AbilityData) || !CheckDelivery(Spec.AbilityData));
+
+		if (SlotView.SlotIndex != INDEX_NONE && OutViews.IsValidIndex(SlotView.SlotIndex))
+		{
+			OutViews[SlotView.SlotIndex] = SlotView;
+			continue;
+		}
+
+		SlotView.SlotIndex = OutViews.Num();
+		OutViews.Add(SlotView);
+	}
+}
+
+void UCussAbilityComponent::GetActiveEffectViews(TArray<FCussActiveEffectView>& OutViews) const
+{
+	OutViews.Reset();
+
+	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+	for (const FCussActiveEffect& ActiveEffect : ActiveEffects)
+	{
+		FCussActiveEffectView EffectView;
+		TArray<FGameplayTag> GrantedTags;
+		ActiveEffect.GrantedTags.GetGameplayTagArray(GrantedTags);
+		EffectView.EffectTag = GrantedTags.IsEmpty() ? ActiveEffect.AbilityTag : GrantedTags[0];
+		const FText EffectTagText = GetGameplayTagDisplayText(EffectView.EffectTag);
+		EffectView.EffectName = EffectTagText.IsEmpty()
+			? GetAbilityDisplayText(ActiveEffect.SourceAbilityData, ActiveEffect.AbilityTag)
+			: EffectTagText;
+		EffectView.StackCount = ActiveEffect.Stacks;
+		EffectView.bInfiniteDuration = ActiveEffect.Duration <= 0.f;
+		EffectView.TimeRemaining = EffectView.bInfiniteDuration ? 0.f : FMath::Max(0.f, ActiveEffect.EndTime - CurrentTime);
+		EffectView.SourceAbilityName = GetAbilityDisplayText(ActiveEffect.SourceAbilityData, ActiveEffect.AbilityTag);
+		OutViews.Add(EffectView);
+	}
+
+	OutViews.Sort(
+		[](const FCussActiveEffectView& Left, const FCussActiveEffectView& Right)
+		{
+			return Left.TimeRemaining < Right.TimeRemaining;
+		});
+}
+
+void UCussAbilityComponent::GetOwnedTags(FGameplayTagContainer& OutTags) const
+{
+	OutTags = OwnedTags;
 }
 
 const FCussGrantedAbilitySpec* UCussAbilityComponent::FindGrantedAbilityByTag(FGameplayTag AbilityTag) const
@@ -397,6 +741,9 @@ void UCussAbilityComponent::StartCooldown(FCussGrantedAbilitySpec& Spec)
 	{
 		SetCooldownGroupEndTime(Spec.AbilityData->CooldownGroupTag, CooldownEndTime);
 	}
+
+	NotifyAbilitySlotsChanged();
+	AddCombatLogEntry(ECussCombatLogEntryType::Cooldown, BuildCooldownLogMessage(Spec.AbilityData));
 }
 
 void UCussAbilityComponent::HandleProjectileImpact(const FCussAbilityProjectileSpawnContext& ProjectileContext, AActor* ImpactActor, const FVector& ImpactLocation)
@@ -411,6 +758,7 @@ void UCussAbilityComponent::HandleProjectileImpact(const FCussAbilityProjectileS
 		return;
 	}
 
+	AddCombatLogEntry(ECussCombatLogEntryType::Delivery, BuildProjectileImpactLogMessage(ProjectileContext.SourceAbilityData, ImpactActor));
 	ResolveAndApplyEffects(ProjectileContext.SourceAbilityData, ProjectileContext.Effects, ProjectileContext.AbilityLevel, ImpactActor, ImpactLocation);
 }
 
@@ -450,6 +798,7 @@ void UCussAbilityComponent::SpawnProjectileForAbility(const FCussGrantedAbilityS
 
 	Projectile->InitializeProjectile(SpawnContext, ProjectileDef);
 	Projectile->FinishSpawning(SpawnTransform);
+	AddCombatLogEntry(ECussCombatLogEntryType::Delivery, BuildProjectileSpawnLogMessage(Spec.AbilityData));
 }
 
 FCussAbilityProjectileSpawnContext UCussAbilityComponent::BuildProjectileSpawnContext(const FCussGrantedAbilitySpec& Spec, const FVector& SpawnLocation, const FVector& LaunchDirection) const
@@ -483,6 +832,81 @@ FVector UCussAbilityComponent::ResolveProjectileAimLocation(const UCussAbilityDa
 	}
 
 	return GetOwner()->GetActorLocation() + (GetOwner()->GetActorForwardVector() * 1000.f);
+}
+
+ECussAbilityActivationFailReason UCussAbilityComponent::DetermineActivationFailure(const FCussGrantedAbilitySpec& Spec, AActor* OptionalTargetActor, const FVector& TargetLocation, FGameplayTag& OutRelatedTag, float& OutCooldownRemaining) const
+{
+	OutRelatedTag = FGameplayTag();
+	OutCooldownRemaining = 0.f;
+
+	if (!Spec.IsValid() || !Spec.AbilityData)
+	{
+		return ECussAbilityActivationFailReason::InvalidContext;
+	}
+
+	if (!CheckDelivery(Spec.AbilityData))
+	{
+		return ECussAbilityActivationFailReason::InvalidContext;
+	}
+
+	if (!CheckCooldown(Spec))
+	{
+		OutCooldownRemaining = GetRemainingCooldown(Spec.AbilityData->AbilityTag);
+		OutRelatedTag = Spec.AbilityData->CooldownGroupTag;
+		return ECussAbilityActivationFailReason::OnCooldown;
+	}
+
+	if (!StatComponent && !Spec.AbilityData->Costs.IsEmpty())
+	{
+		return ECussAbilityActivationFailReason::InvalidContext;
+	}
+
+	for (const FCussAbilityStatCost& Cost : Spec.AbilityData->Costs)
+	{
+		if (!StatComponent || !StatComponent->HasEnoughStat(Cost.StatTag, Cost.Amount))
+		{
+			OutRelatedTag = Cost.StatTag;
+			return ECussAbilityActivationFailReason::InsufficientResources;
+		}
+	}
+
+	for (const FGameplayTag& RequiredTag : Spec.AbilityData->RequiredOwnerTags)
+	{
+		if (!OwnedTags.HasTag(RequiredTag))
+		{
+			OutRelatedTag = RequiredTag;
+			return ECussAbilityActivationFailReason::MissingRequiredTags;
+		}
+	}
+
+	for (const FGameplayTag& BlockedTag : Spec.AbilityData->BlockedOwnerTags)
+	{
+		if (OwnedTags.HasTag(BlockedTag))
+		{
+			OutRelatedTag = BlockedTag;
+			return ECussAbilityActivationFailReason::BlockedByTags;
+		}
+	}
+
+	if (!ValidateTargeting(Spec.AbilityData, OptionalTargetActor, TargetLocation))
+	{
+		return ECussAbilityActivationFailReason::InvalidTarget;
+	}
+
+	return ECussAbilityActivationFailReason::Unknown;
+}
+
+FCussAbilityActivationResultView UCussAbilityComponent::BuildActivationResultView(const UCussAbilityData* AbilityData, FGameplayTag AbilityTag, bool bSuccess, ECussAbilityActivationFailReason FailReason, FGameplayTag RelatedTag, float CooldownRemaining, const FText& Message) const
+{
+	FCussAbilityActivationResultView ActivationResult;
+	ActivationResult.AbilityTag = AbilityTag;
+	ActivationResult.AbilityName = GetAbilityDisplayText(AbilityData, AbilityTag);
+	ActivationResult.bSuccess = bSuccess;
+	ActivationResult.FailReason = FailReason;
+	ActivationResult.RelatedTag = RelatedTag;
+	ActivationResult.CooldownRemaining = CooldownRemaining;
+	ActivationResult.Message = Message;
+	return ActivationResult;
 }
 
 void UCussAbilityComponent::ResolveAndApplyEffects(UCussAbilityData* AbilityData, const TArray<FCussAbilityEffectDef>& Effects, int32 AbilityLevel, AActor* OptionalTargetActor, const FVector& TargetLocation)
@@ -618,11 +1042,13 @@ void UCussAbilityComponent::ApplyEffectToResolvedTarget(UCussAbilityData* Abilit
 		if (UCussAbilityComponent* TargetAbilityComp = GetAbilityComponent(ResolvedTarget))
 		{
 			TargetAbilityComp->AddActiveEffectFromContext(EffectContext, EffectDef);
+			AddCombatLogEntry(ECussCombatLogEntryType::Effect, BuildEffectLogMessage(AbilityData, EffectDef, ResolvedTarget));
 		}
 		return;
 	}
 
 	ApplyInstantEffectFromContext(EffectContext, EffectDef);
+	AddCombatLogEntry(ECussCombatLogEntryType::Effect, BuildEffectLogMessage(AbilityData, EffectDef, ResolvedTarget));
 }
 
 void UCussAbilityComponent::ApplyInstantEffectFromContext(const FCussEffectContext& EffectContext, const FCussAbilityEffectDef& EffectDef)
@@ -753,6 +1179,7 @@ void UCussAbilityComponent::AddActiveEffectFromContext(const FCussEffectContext&
 	}
 
 	ActiveEffects.Add(NewEffect);
+	NotifyActiveEffectsChanged();
 
 	ResetDurationTimer(NewEffect);
 
@@ -811,7 +1238,7 @@ void UCussAbilityComponent::ApplyPeriodicEffectTick(const FCussActiveEffect& Eff
 	BroadcastEvent(Effect.SourceActor.Get(), GetOwner(), Effect.AbilityTag, ECussAbilityEventResult::EffectApplied, AppliedMagnitude, GetOwner()->GetActorLocation(), FGameplayTag(), Effect.GrantedTags);
 }
 
-void UCussAbilityComponent::RemoveActiveEffectById(FGuid EffectId)
+void UCussAbilityComponent::RemoveActiveEffectById(FGuid EffectId, bool bExpired)
 {
 	const int32 Index = ActiveEffects.IndexOfByPredicate(
 		[&EffectId](const FCussActiveEffect& Effect)
@@ -852,6 +1279,8 @@ void UCussAbilityComponent::RemoveActiveEffectById(FGuid EffectId)
 	}
 
 	ActiveEffects.RemoveAt(Index);
+	NotifyActiveEffectsChanged();
+	AddCombatLogEntry(ECussCombatLogEntryType::Effect, BuildActiveEffectRemovedLogMessage(RemovedEffect, bExpired));
 
 	BroadcastEvent(RemovedEffect.SourceActor.Get(), GetOwner(), RemovedEffect.AbilityTag, ECussAbilityEventResult::EffectRemoved, 0.f, GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector, FGameplayTag(), RemovedEffect.GrantedTags);
 }
@@ -861,6 +1290,8 @@ void UCussAbilityComponent::AddOwnedTag(FGameplayTag Tag)
 	if (Tag.IsValid())
 	{
 		OwnedTags.AddTag(Tag);
+		NotifyOwnedTagsChanged();
+		NotifyAbilitySlotsChanged();
 	}
 }
 
@@ -869,6 +1300,8 @@ void UCussAbilityComponent::RemoveOwnedTag(FGameplayTag Tag)
 	if (Tag.IsValid())
 	{
 		OwnedTags.RemoveTag(Tag);
+		NotifyOwnedTagsChanged();
+		NotifyAbilitySlotsChanged();
 	}
 }
 
@@ -890,7 +1323,7 @@ void UCussAbilityComponent::HandleEffectPeriod(FGuid EffectId)
 
 void UCussAbilityComponent::HandleEffectExpired(FGuid EffectId)
 {
-	RemoveActiveEffectById(EffectId);
+	RemoveActiveEffectById(EffectId, true);
 }
 
 void UCussAbilityComponent::BroadcastEvent(AActor* InstigatorActor, AActor* TargetActor, FGameplayTag AbilityTag, ECussAbilityEventResult Result, float Magnitude, const FVector& EventLocation, FGameplayTag CueTag, const FGameplayTagContainer& AppliedTags)
@@ -907,6 +1340,51 @@ void UCussAbilityComponent::BroadcastEvent(AActor* InstigatorActor, AActor* Targ
 
 	OnAbilityEvent.Broadcast(EventData);
 	MulticastAbilityEvent(EventData);
+}
+
+void UCussAbilityComponent::EmitActivationResult(const FCussAbilityActivationResultView& ActivationResult)
+{
+	OnAbilityActivationResult.Broadcast(ActivationResult);
+
+	if (GetOwner() && GetOwner()->HasAuthority() && !GetOwner()->HasLocalNetOwner())
+	{
+		ClientReceiveActivationResult(ActivationResult);
+	}
+}
+
+void UCussAbilityComponent::AddCombatLogEntry(ECussCombatLogEntryType EntryType, const FText& Message)
+{
+	if (Message.IsEmpty())
+	{
+		return;
+	}
+
+	FCussCombatLogEntry CombatLogEntry;
+	CombatLogEntry.Type = EntryType;
+	CombatLogEntry.Message = Message;
+	CombatLogEntry.WorldTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+	OnCombatLogEntryAdded.Broadcast(CombatLogEntry);
+
+	if (GetOwner() && GetOwner()->HasAuthority() && !GetOwner()->HasLocalNetOwner())
+	{
+		ClientReceiveCombatLogEntry(CombatLogEntry);
+	}
+}
+
+void UCussAbilityComponent::NotifyAbilitySlotsChanged()
+{
+	OnAbilitySlotsChanged.Broadcast();
+}
+
+void UCussAbilityComponent::NotifyActiveEffectsChanged()
+{
+	OnActiveEffectsChanged.Broadcast();
+}
+
+void UCussAbilityComponent::NotifyOwnedTagsChanged()
+{
+	OnOwnedTagsChanged.Broadcast();
 }
 
 void UCussAbilityComponent::MulticastAbilityEvent_Implementation(const FCussAbilityEvent& EventData)
@@ -1161,6 +1639,7 @@ void UCussAbilityComponent::RefreshActiveEffectDuration(FCussActiveEffect& Activ
 	ActiveEffect.EndTime = ActiveEffect.StartTime + ActiveEffect.Duration;
 
 	ResetDurationTimer(ActiveEffect);
+	NotifyActiveEffectsChanged();
 }
 
 void UCussAbilityComponent::ResetDurationTimer(const FCussActiveEffect& ActiveEffect)

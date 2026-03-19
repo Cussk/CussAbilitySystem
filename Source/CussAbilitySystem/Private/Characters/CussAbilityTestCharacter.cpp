@@ -3,6 +3,7 @@
 #include "Characters/CussAbilityTestCharacter.h"
 
 #include "Components/CussAbilityComponent.h"
+#include "Components/CussAbilityDebugComponent.h"
 #include "Components/CussStatComponent.h"
 
 #include "EnhancedInputComponent.h"
@@ -16,6 +17,7 @@ ACussAbilityTestCharacter::ACussAbilityTestCharacter()
 	PrimaryActorTick.bCanEverTick = false;
 
 	AbilityComponent = CreateDefaultSubobject<UCussAbilityComponent>(TEXT("AbilityComponent"));
+	AbilityDebugComponent = CreateDefaultSubobject<UCussAbilityDebugComponent>(TEXT("AbilityDebugComponent"));
 	StatComponent = CreateDefaultSubobject<UCussStatComponent>(TEXT("StatComponent"));
 }
 
